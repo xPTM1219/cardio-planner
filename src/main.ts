@@ -1,0 +1,313 @@
+import { MapComponent } from './components/MapComponent';
+import { RoutePlanner } from './components/RoutePlanner';
+import { StorageManager, UserSettings } from './components/StorageManager';
+
+// DOM elements
+const app = document.getElementById('app');
+if (!app) {
+  throw new Error('App container not found');
+}
+
+// Initialize components
+const mapComponent = MapComponent.getInstance();
+const routePlanner = RoutePlanner.getInstance();
+const storageManager = StorageManager.getInstance();
+
+// Show loading overlay
+function showLoading(): void {
+  const loading = document.createElement('div');
+  loading.className = 'loading-overlay';
+  loading.innerHTML = '<h2>Loading Walk Planner...</h2>';
+  app.appendChild(loading);
+}
+
+function hideLoading(): void {
+  const loading = document.querySelector('.loading-overlay') as HTMLElement;
+  if (loading) {
+    loading.classList.add('hidden');
+  }
+}
+
+// Create control panel HTML
+const controlsHTML = `
+  <div class="control-panel">
+    <h2>Route Planner</h2>
+    
+    <div class="form-group">
+      <label for="start-point">Start Point (Click on map)</label>
+      <input type="text" id="start-point" placeholder="Will be auto-filled" readonly />
+    </div>
+    
+    <div class="form-group">
+      <label for="end-point">End Point (Click on map)</label>
+      <input type="text" id="end-point" placeholder="Will be auto-filled" readonly />
+    </div>
+    
+    <button class="btn" id="calculate-btn">Calculate Route</button>
+    <button class="btn btn-secondary" id="clear-btn">Clear All</button>
+    
+    <div class="form-group" style="margin-top: 1rem;">
+      <label for="route-name">Route Name</label>
+      <input type="text" id="route-name" placeholder="Enter route name..." />
+    </div>
+    
+    <button class="btn btn-secondary" id="save-route-btn">Save Route</button>
+  </div>
+`;
+
+// Create route info panel HTML
+const routeInfoHTML = `
+  <div class="route-info">
+    <h3>Route Information</h3>
+    <p id="route-status" style="color: #666;">Click on the map to add waypoints...</p>
+  </div>
+`;
+
+// Create settings panel HTML
+const settingsHTML = `
+  <div class="settings-panel">
+    <h3>Settings</h3>
+    
+    <div class="form-group">
+      <label for="units">Units</label>
+      <select id="units">
+        <option value="metric">Metric (km)</option>
+        <option value="imperial">Imperial (mi)</option>
+      </select>
+    </div>
+    
+    <div class="form-group">
+      <label for="fitness-level">Fitness Level</label>
+      <select id="fitness-level">
+        <option value="casual">Casual</option>
+        <option value="moderate" selected>Moderate</option>
+        <option value="active">Active</option>
+      </select>
+    </div>
+    
+    <button class="btn btn-secondary" id="save-settings-btn">Save Settings</button>
+  </div>
+`;
+
+// Initialize UI
+async function initUI(): Promise<void> {
+  // Wait for DOM to be ready
+  const mapContainer = document.getElementById('map');
+  if (!mapContainer) {
+    throw new Error('Map container not found');
+  }
+  
+  // Show loading
+  showLoading();
+  
+  // Hide loading after a short delay
+  setTimeout(hideLoading, 500);
+  
+  // Create panels and append to app (after header)
+  const controls = document.createElement('div');
+  controls.innerHTML = controlsHTML;
+  
+  const routeInfo = document.createElement('div');
+  routeInfo.innerHTML = routeInfoHTML;
+  
+  const settings = document.createElement('div');
+  settings.innerHTML = settingsHTML;
+  
+  // Append panels after the header element
+  const header = app.querySelector('.header');
+  if (header) {
+    app.insertBefore(controls, mapContainer);
+    app.insertBefore(routeInfo, mapContainer);
+    app.insertBefore(settings, mapContainer);
+  } else {
+    // If no header, just append all panels
+    app.appendChild(controls);
+    app.appendChild(routeInfo);
+    app.appendChild(settings);
+  }
+  
+  // Initialize map
+  await mapComponent.init('map');
+  
+  // Setup event listeners
+  setupEventListeners();
+}
+
+// Setup event listeners
+function setupEventListeners(): void {
+  const calculateBtn = document.getElementById('calculate-btn') as HTMLButtonElement;
+  const clearBtn = document.getElementById('clear-btn') as HTMLButtonElement;
+  const saveRouteBtn = document.getElementById('save-route-btn') as HTMLButtonElement;
+  const unitsSelect = document.getElementById('units') as HTMLSelectElement;
+  const fitnessLevelSelect = document.getElementById('fitness-level') as HTMLSelectElement;
+  const saveSettingsBtn = document.getElementById('save-settings-btn') as HTMLButtonElement;
+  
+  // Map click handler for adding waypoints
+  const map = mapComponent.getMap();
+  if (map) {
+    map.on('click', async (e: MouseEvent) => {
+      const latlng = map.getContainerPoint(e.clientX, e.clientY).latLng;
+      
+      // Update waypoint inputs
+      const startPointEl = document.getElementById('start-point') as HTMLInputElement;
+      const endPointEl = document.getElementById('end-point') as HTMLInputElement;
+      
+      startPointEl.value = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+      endPointEl.value = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+      
+      // Add waypoint to planner
+      routePlanner.addWaypoint([latlng.lat, latlng.lng]);
+      
+      // Update status
+      const waypoints = routePlanner.getWaypoints();
+      const statusEl = document.getElementById('route-status');
+      if (statusEl) {
+        statusEl.textContent = `Added ${waypoints.length} waypoint(s). Click again to add more. Then click "Calculate Route".`;
+      }
+    });
+  }
+  
+  // Calculate route button
+  calculateBtn?.addEventListener('click', async () => {
+    try {
+      const route = await routePlanner.calculateRoute();
+      
+      if (route) {
+        // Render route on map
+        mapComponent.renderRoute(route);
+        
+        // Update status
+        const statusEl = document.getElementById('route-status');
+        if (statusEl) {
+          const units = unitsSelect?.value as 'metric' | 'imperial';
+          const info = routePlanner.getRouteInfo(units);
+          statusEl.textContent = info || 'No route information available.';
+        }
+      }
+    } catch (error) {
+      console.error('Error calculating route:', error);
+      
+      const statusEl = document.getElementById('route-status');
+      if (statusEl) {
+        statusEl.textContent = 'Error: Could not calculate route. Please try again.';
+      }
+    }
+  });
+  
+  // Clear button
+  clearBtn?.addEventListener('click', () => {
+    routePlanner.clear();
+    mapComponent.clearRoute();
+    mapComponent.clearWaypointMarkers();
+    
+    const statusEl = document.getElementById('route-status');
+    if (statusEl) {
+      statusEl.textContent = 'Map cleared. Click on the map to add waypoints...';
+    }
+    
+    // Clear inputs
+    const startPointEl = document.getElementById('start-point') as HTMLInputElement;
+    const endPointEl = document.getElementById('end-point') as HTMLInputElement;
+    
+    startPointEl.value = '';
+    endPointEl.value = '';
+  });
+  
+  // Save route button
+  saveRouteBtn?.addEventListener('click', async () => {
+    const routeNameInput = document.getElementById('route-name') as HTMLInputElement;
+    const routeName = routeNameInput.value || `Route ${Date.now()}`;
+    
+    try {
+      const currentRoute = routePlanner.getCurrentRoute();
+      
+      if (currentRoute) {
+        // Update route name
+        currentRoute.name = routeName;
+        
+        // Save to storage
+        await storageManager.saveRoute(currentRoute);
+        
+        // Clear input
+        routeNameInput.value = '';
+        
+        const statusEl = document.getElementById('route-status');
+        if (statusEl) {
+          statusEl.textContent = `Route "${routeName}" saved successfully!`;
+        }
+      }
+    } catch (error) {
+      console.error('Error saving route:', error);
+      
+      const statusEl = document.getElementById('route-status');
+      if (statusEl) {
+        statusEl.textContent = 'Error: Could not save route.';
+      }
+    }
+  });
+  
+  // Units select change
+  unitsSelect?.addEventListener('change', (e: Event) => {
+    const units = (e.target as HTMLSelectElement).value as 'metric' | 'imperial';
+    mapComponent.updateSettings({ units });
+    
+    // Update route info display
+    const currentRoute = routePlanner.getCurrentRoute();
+    if (currentRoute) {
+      const statusEl = document.getElementById('route-status');
+      if (statusEl) {
+        const info = routePlanner.getRouteInfo(units);
+        statusEl.textContent = info || 'No route information available.';
+      }
+    }
+  });
+  
+  // Fitness level select change
+  fitnessLevelSelect?.addEventListener('change', (e: Event) => {
+    const fitnessLevel = (e.target as HTMLSelectElement).value as 'casual' | 'moderate' | 'active';
+    mapComponent.updateSettings({ fitnessLevel });
+    
+    // Save settings
+    saveSettingsBtn?.click();
+  });
+  
+  // Save settings button
+  saveSettingsBtn?.addEventListener('click', async () => {
+    try {
+      const units = unitsSelect?.value as 'metric' | 'imperial';
+      const fitnessLevel = fitnessLevelSelect?.value as 'casual' | 'moderate' | 'active';
+      
+      // Get current settings
+      const currentSettings = storageManager.getSettings();
+      
+      // Update settings
+      const newSettings: UserSettings = {
+        name: currentSettings.name,
+        units,
+        fitnessLevel,
+      };
+      
+      await storageManager.saveSettings(newSettings);
+      
+      // Update map component settings
+      mapComponent.updateSettings({ units, fitnessLevel });
+      
+      const statusEl = document.getElementById('route-status');
+      if (statusEl) {
+        statusEl.textContent = 'Settings saved successfully!';
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      
+      const statusEl = document.getElementById('route-status');
+      if (statusEl) {
+        statusEl.textContent = 'Error: Could not save settings.';
+      }
+    }
+  });
+}
+
+// Start the app
+initUI().catch(error => {
+  console.error('Failed to initialize app:', error);
+});

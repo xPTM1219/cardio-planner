@@ -1,0 +1,173 @@
+import 'leaflet';
+import L from 'leaflet';
+// import 'leaflet/dist/leaflet.css';
+import { Route } from '../types';
+
+export class MapComponent {
+  private static instance: MapComponent;
+  private map: L.Map | null = null;
+  private routeLayer: L.Polyline | null = null;
+  private waypointsLayer: L.LayerGroup | null = null;
+  private settings: { units: 'metric' | 'imperial'; fitnessLevel: 'casual' | 'moderate' | 'active' } = {
+    units: 'metric',
+    fitnessLevel: 'moderate',
+  };
+
+  private constructor() {}
+
+  public static getInstance(): MapComponent {
+    if (!MapComponent.instance) {
+      MapComponent.instance = new MapComponent();
+    }
+    return MapComponent.instance;
+  }
+
+  /**
+   * Initialize the map
+   */
+  async init(containerId: string): Promise<void> {
+    try {
+      this.map = L.map(containerId).setView([51.505, -0.09], 13);
+
+      // Add OpenStreetMap tile layer
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(this.map);
+
+      // Add custom markers for waypoints
+      this.setupWaypointMarkers();
+
+      console.log('Map initialized successfully');
+    } catch (error) {
+      console.error('Error initializing map:', error);
+      throw new Error('Failed to initialize map');
+    }
+  }
+
+  /**
+   * Setup custom waypoint markers
+   */
+  private setupWaypointMarkers(): void {
+    this.waypointsLayer = L.layerGroup().addTo(this.map);
+  }
+
+  /**
+   * Render a route on the map
+   */
+  renderRoute(route: Route): void {
+    // Remove existing route if present
+    if (this.routeLayer) {
+      this.map.removeLayer(this.routeLayer);
+    }
+
+    // Create polyline from route geometry
+    const coordinates = route.geometry.coordinates;
+    const polyline = L.polyline(coordinates, {
+      color: '#e74c3c',
+      weight: 4,
+      opacity: 0.8,
+      dashArray: '10, 10',
+    }).addTo(this.map);
+
+    this.routeLayer = polyline;
+
+    // Add popup with route info
+    const distanceKm = (route.distance / 1000).toFixed(2);
+    const durationMin = Math.round(route.duration / 60);
+
+    const popupContent = `
+      <div style="min-width: 150px;">
+        <strong>${route.name}</strong><br/>
+        Distance: ${distanceKm} km<br/>
+        Duration: ${durationMin} min
+      </div>
+    `;
+
+    polyline.bindPopup(popupContent);
+  }
+
+  /**
+   * Remove route from map
+   */
+  clearRoute(): void {
+    if (this.routeLayer) {
+      this.map.removeLayer(this.routeLayer);
+      this.routeLayer = null;
+    }
+  }
+
+  /**
+   * Add a waypoint marker to the map
+   */
+  addWaypointMarker(location: [number, number]): L.Marker {
+    const marker = L.marker(location, {
+      icon: this.createCustomIcon(),
+    }).addTo(this.waypointsLayer);
+
+    marker.on('click', () => {
+      console.log('Waypoint clicked:', location);
+    });
+
+    return marker;
+  }
+
+  /**
+   * Remove all waypoint markers
+   */
+  clearWaypointMarkers(): void {
+    if (this.waypointsLayer) {
+      this.waypointsLayer.clearLayers();
+    }
+  }
+
+  /**
+   * Create custom icon for waypoints
+   */
+  private createCustomIcon(): L.Icon {
+    return new L.Icon({
+      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/markers-png/red.png',
+      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41],
+    });
+  }
+
+  /**
+   * Fit map to show all waypoints and route
+   */
+  fitBounds(waypoints: [number, number][]): void {
+    if (waypoints.length >= 2) {
+      const bounds = L.latLngBounds(waypoints);
+      this.map.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }
+
+  /**
+   * Get the map instance
+   */
+  getMap(): L.Map | null {
+    return this.map;
+  }
+
+  /**
+   * Update settings (called when user changes preferences)
+   */
+  updateSettings(settings: Partial<typeof this.settings>): void {
+    this.settings = { ...this.settings, ...settings };
+  }
+
+  /**
+   * Remove map from DOM
+   */
+  destroy(): void {
+    if (this.map) {
+      this.map.remove();
+      this.map = null;
+    }
+    this.routeLayer = null;
+    this.waypointsLayer = null;
+  }
+}
