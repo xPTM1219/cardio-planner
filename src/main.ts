@@ -29,6 +29,10 @@ function hideLoading(): void {
   }
 }
 
+function applyTheme(darkMode: boolean): void {
+  document.body.classList.toggle('dark-mode', darkMode);
+}
+
 // Create control panel HTML
 const controlsHTML = `
   <div class="control-panel">
@@ -84,6 +88,11 @@ const settingsHTML = `
         <option value="moderate" selected>Moderate</option>
         <option value="active">Active</option>
       </select>
+    </div>
+
+    <div class="form-group">
+      <label for="dark-mode-toggle">Dark Mode</label>
+      <input type="checkbox" id="dark-mode-toggle" />
     </div>
 
     <div class="form-group">
@@ -145,15 +154,19 @@ async function initUI(): Promise<void> {
 
   const unitsSelect = document.getElementById('units') as HTMLSelectElement | null;
   const fitnessLevelSelect = document.getElementById('fitness-level') as HTMLSelectElement | null;
+  const darkModeToggle = document.getElementById('dark-mode-toggle') as HTMLInputElement | null;
   const homeLatInput = document.getElementById('home-lat') as HTMLInputElement | null;
   const homeLngInput = document.getElementById('home-lng') as HTMLInputElement | null;
   const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement | null;
 
   if (unitsSelect) unitsSelect.value = savedSettings.units;
   if (fitnessLevelSelect) fitnessLevelSelect.value = savedSettings.fitnessLevel;
+  if (darkModeToggle) darkModeToggle.checked = savedSettings.darkMode;
   if (homeLatInput) homeLatInput.value = String(savedSettings.homeLocation.lat);
   if (homeLngInput) homeLngInput.value = String(savedSettings.homeLocation.lng);
   if (homeZoomInput) homeZoomInput.value = String(savedSettings.homeLocation.zoom);
+
+  applyTheme(savedSettings.darkMode);
   
   // Setup event listeners
   setupEventListeners();
@@ -166,6 +179,7 @@ function setupEventListeners(): void {
   const saveRouteBtn = document.getElementById('save-route-btn') as HTMLButtonElement;
   const unitsSelect = document.getElementById('units') as HTMLSelectElement;
   const fitnessLevelSelect = document.getElementById('fitness-level') as HTMLSelectElement;
+  const darkModeToggle = document.getElementById('dark-mode-toggle') as HTMLInputElement;
   const homeLatInput = document.getElementById('home-lat') as HTMLInputElement;
   const homeLngInput = document.getElementById('home-lng') as HTMLInputElement;
   const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement;
@@ -300,6 +314,13 @@ function setupEventListeners(): void {
     // Save settings
     saveSettingsBtn?.click();
   });
+
+  // Dark mode toggle
+  darkModeToggle?.addEventListener('change', (e: Event) => {
+    const darkMode = (e.target as HTMLInputElement).checked;
+    applyTheme(darkMode);
+    saveSettingsBtn?.click();
+  });
   
   // Save settings button
   useCurrentViewBtn?.addEventListener('click', () => {
@@ -324,6 +345,7 @@ function setupEventListeners(): void {
     try {
       const units = unitsSelect?.value as 'metric' | 'imperial';
       const fitnessLevel = fitnessLevelSelect?.value as 'casual' | 'moderate' | 'active';
+      const darkMode = Boolean(darkModeToggle?.checked);
       const lat = Number(homeLatInput?.value);
       const lng = Number(homeLngInput?.value);
       const zoom = Number(homeZoomInput?.value);
@@ -346,6 +368,7 @@ function setupEventListeners(): void {
         name: currentSettings.name,
         units,
         fitnessLevel,
+        darkMode,
         homeLocation: {
           lat,
           lng,
@@ -358,6 +381,7 @@ function setupEventListeners(): void {
       // Update map component settings
       mapComponent.updateSettings({ units, fitnessLevel });
       mapComponent.setHomeView(newSettings.homeLocation);
+      applyTheme(darkMode);
       
       const statusEl = document.getElementById('route-status');
       if (statusEl) {

@@ -33,6 +33,7 @@ export class StorageManager {
         units: 'metric',
         fitnessLevel: 'moderate',
         homeLocation: DEFAULT_HOME_LOCATION,
+        darkMode: false,
       };
 
       if (stored) {
@@ -41,6 +42,7 @@ export class StorageManager {
           ...defaultSettings,
           ...parsed,
           homeLocation: parsed.homeLocation ?? defaultSettings.homeLocation,
+          darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : defaultSettings.darkMode,
         };
 
         // Persist normalized settings to support migration from older schema
@@ -79,6 +81,7 @@ export class StorageManager {
       units: 'metric',
       fitnessLevel: 'moderate',
       homeLocation: DEFAULT_HOME_LOCATION,
+      darkMode: false,
     };
   }
 

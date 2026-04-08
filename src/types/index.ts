@@ -9,6 +9,7 @@ export interface UserSettings {
   units: 'metric' | 'imperial';
   fitnessLevel: 'casual' | 'moderate' | 'active';
   homeLocation: HomeLocation;
+  darkMode: boolean;
 }
 
 export interface Waypoint {
