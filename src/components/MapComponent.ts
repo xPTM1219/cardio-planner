@@ -1,7 +1,7 @@
 import 'leaflet';
 import L from 'leaflet';
 // Leaflet CSS is loaded from index.html to avoid TS side-effect import typing issues.
-import { Route } from '../types';
+import { HomeLocation, Route } from '../types';
 
 export class MapComponent {
   private static instance: MapComponent;
@@ -27,7 +27,12 @@ export class MapComponent {
    */
   async init(containerId: string): Promise<void> {
     try {
-      this.map = L.map(containerId).setView([51.505, -0.09], 13);
+      const defaultHome: HomeLocation = {
+        lat: 18.2644,
+        lng: -65.648,
+        zoom: 13,
+      };
+      this.map = L.map(containerId).setView([defaultHome.lat, defaultHome.lng], defaultHome.zoom);
 
       // Add OpenStreetMap tile layer
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -177,6 +182,17 @@ export class MapComponent {
    */
   updateSettings(settings: Partial<typeof this.settings>): void {
     this.settings = { ...this.settings, ...settings };
+  }
+
+  /**
+   * Set the map view to a specific home location.
+   */
+  setHomeView(homeLocation: HomeLocation): void {
+    if (!this.map) {
+      return;
+    }
+
+    this.map.setView([homeLocation.lat, homeLocation.lng], homeLocation.zoom);
   }
 
   /**

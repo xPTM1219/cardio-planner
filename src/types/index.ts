@@ -1,7 +1,14 @@
+export interface HomeLocation {
+  lat: number;
+  lng: number;
+  zoom: number;
+}
+
 export interface UserSettings {
   name: string;
   units: 'metric' | 'imperial';
   fitnessLevel: 'casual' | 'moderate' | 'active';
+  homeLocation: HomeLocation;
 }
 
 export interface Waypoint {

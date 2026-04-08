@@ -85,6 +85,23 @@ const settingsHTML = `
         <option value="active">Active</option>
       </select>
     </div>
+
+    <div class="form-group">
+      <label for="home-lat">Home Location Latitude</label>
+      <input type="number" id="home-lat" placeholder="18.2644" step="0.0001" />
+    </div>
+
+    <div class="form-group">
+      <label for="home-lng">Home Location Longitude</label>
+      <input type="number" id="home-lng" placeholder="-65.6480" step="0.0001" />
+    </div>
+
+    <div class="form-group">
+      <label for="home-zoom">Home Zoom</label>
+      <input type="number" id="home-zoom" placeholder="13" min="1" max="19" step="1" />
+    </div>
+
+    <button class="btn btn-secondary" id="use-current-view-btn">Use Current Map View</button>
     
     <button class="btn btn-secondary" id="save-settings-btn">Save Settings</button>
   </div>
@@ -117,6 +134,26 @@ async function initUI(): Promise<void> {
   
   // Initialize map
   await mapComponent.init('map');
+
+  // Load and apply persisted settings
+  const savedSettings = await storageManager.loadSettings();
+  mapComponent.updateSettings({
+    units: savedSettings.units,
+    fitnessLevel: savedSettings.fitnessLevel,
+  });
+  mapComponent.setHomeView(savedSettings.homeLocation);
+
+  const unitsSelect = document.getElementById('units') as HTMLSelectElement | null;
+  const fitnessLevelSelect = document.getElementById('fitness-level') as HTMLSelectElement | null;
+  const homeLatInput = document.getElementById('home-lat') as HTMLInputElement | null;
+  const homeLngInput = document.getElementById('home-lng') as HTMLInputElement | null;
+  const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement | null;
+
+  if (unitsSelect) unitsSelect.value = savedSettings.units;
+  if (fitnessLevelSelect) fitnessLevelSelect.value = savedSettings.fitnessLevel;
+  if (homeLatInput) homeLatInput.value = String(savedSettings.homeLocation.lat);
+  if (homeLngInput) homeLngInput.value = String(savedSettings.homeLocation.lng);
+  if (homeZoomInput) homeZoomInput.value = String(savedSettings.homeLocation.zoom);
   
   // Setup event listeners
   setupEventListeners();
@@ -129,6 +166,10 @@ function setupEventListeners(): void {
   const saveRouteBtn = document.getElementById('save-route-btn') as HTMLButtonElement;
   const unitsSelect = document.getElementById('units') as HTMLSelectElement;
   const fitnessLevelSelect = document.getElementById('fitness-level') as HTMLSelectElement;
+  const homeLatInput = document.getElementById('home-lat') as HTMLInputElement;
+  const homeLngInput = document.getElementById('home-lng') as HTMLInputElement;
+  const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement;
+  const useCurrentViewBtn = document.getElementById('use-current-view-btn') as HTMLButtonElement;
   const saveSettingsBtn = document.getElementById('save-settings-btn') as HTMLButtonElement;
   
   // Map click handler for adding waypoints
@@ -261,10 +302,41 @@ function setupEventListeners(): void {
   });
   
   // Save settings button
+  useCurrentViewBtn?.addEventListener('click', () => {
+    const map = mapComponent.getMap();
+    if (!map) {
+      return;
+    }
+
+    const center = map.getCenter();
+    homeLatInput.value = center.lat.toFixed(6);
+    homeLngInput.value = center.lng.toFixed(6);
+    homeZoomInput.value = String(map.getZoom());
+
+    const statusEl = document.getElementById('route-status');
+    if (statusEl) {
+      statusEl.textContent = 'Captured current map view. Click "Save Settings" to persist.';
+    }
+  });
+
+  // Save settings button
   saveSettingsBtn?.addEventListener('click', async () => {
     try {
       const units = unitsSelect?.value as 'metric' | 'imperial';
       const fitnessLevel = fitnessLevelSelect?.value as 'casual' | 'moderate' | 'active';
+      const lat = Number(homeLatInput?.value);
+      const lng = Number(homeLngInput?.value);
+      const zoom = Number(homeZoomInput?.value);
+
+      if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+        throw new Error('Latitude must be a number between -90 and 90.');
+      }
+      if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+        throw new Error('Longitude must be a number between -180 and 180.');
+      }
+      if (!Number.isFinite(zoom) || zoom < 1 || zoom > 19) {
+        throw new Error('Zoom must be a number between 1 and 19.');
+      }
       
       // Get current settings
       const currentSettings = storageManager.getSettings();
@@ -274,12 +346,18 @@ function setupEventListeners(): void {
         name: currentSettings.name,
         units,
         fitnessLevel,
+        homeLocation: {
+          lat,
+          lng,
+          zoom,
+        },
       };
       
       await storageManager.saveSettings(newSettings);
       
       // Update map component settings
       mapComponent.updateSettings({ units, fitnessLevel });
+      mapComponent.setHomeView(newSettings.homeLocation);
       
       const statusEl = document.getElementById('route-status');
       if (statusEl) {

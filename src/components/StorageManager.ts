@@ -1,7 +1,13 @@
-import { UserSettings, Route } from '../types';
+import { HomeLocation, UserSettings, Route } from '../types';
 
 const STORAGE_KEY_SETTINGS = 'walk_planner_settings';
 const STORAGE_KEY_ROUTES = 'walk_planner_routes';
+const DEFAULT_HOME_LOCATION: HomeLocation = {
+  // Ceiba, Puerto Rico
+  lat: 18.2644,
+  lng: -65.648,
+  zoom: 13,
+};
 
 export class StorageManager {
   private static instance: StorageManager;
@@ -22,18 +28,26 @@ export class StorageManager {
   async loadSettings(): Promise<UserSettings> {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (stored) {
-        this.settings = JSON.parse(stored);
-        return this.getSettings();
-      }
-      
-      // Default settings if none exist
       const defaultSettings: UserSettings = {
         name: '',
         units: 'metric',
         fitnessLevel: 'moderate',
+        homeLocation: DEFAULT_HOME_LOCATION,
       };
-      
+
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<UserSettings>;
+        this.settings = {
+          ...defaultSettings,
+          ...parsed,
+          homeLocation: parsed.homeLocation ?? defaultSettings.homeLocation,
+        };
+
+        // Persist normalized settings to support migration from older schema
+        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(this.settings));
+        return this.getSettings();
+      }
+
       this.settings = defaultSettings;
       localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(defaultSettings));
       return defaultSettings;
@@ -64,6 +78,7 @@ export class StorageManager {
       name: '',
       units: 'metric',
       fitnessLevel: 'moderate',
+      homeLocation: DEFAULT_HOME_LOCATION,
     };
   }
 
