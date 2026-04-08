@@ -7,6 +7,7 @@ const app = document.getElementById('app');
 if (!app) {
   throw new Error('App container not found');
 }
+const appRoot = app;
 
 // Initialize components
 const mapComponent = MapComponent.getInstance();
@@ -18,7 +19,7 @@ function showLoading(): void {
   const loading = document.createElement('div');
   loading.className = 'loading-overlay';
   loading.innerHTML = '<h2>Loading Walk Planner...</h2>';
-  app.appendChild(loading);
+  appRoot.appendChild(loading);
 }
 
 function hideLoading(): void {
@@ -93,8 +94,14 @@ const settingsHTML = `
 async function initUI(): Promise<void> {
   // Wait for DOM to be ready
   const mapContainer = document.getElementById('map');
+  const controlsContainer = document.getElementById('controls');
+  const routeInfoContainer = document.getElementById('route-info');
+  const settingsContainer = document.getElementById('settings');
   if (!mapContainer) {
     throw new Error('Map container not found');
+  }
+  if (!controlsContainer || !routeInfoContainer || !settingsContainer) {
+    throw new Error('UI containers not found');
   }
   
   // Show loading
@@ -103,28 +110,10 @@ async function initUI(): Promise<void> {
   // Hide loading after a short delay
   setTimeout(hideLoading, 500);
   
-  // Create panels and append to app (after header)
-  const controls = document.createElement('div');
-  controls.innerHTML = controlsHTML;
-  
-  const routeInfo = document.createElement('div');
-  routeInfo.innerHTML = routeInfoHTML;
-  
-  const settings = document.createElement('div');
-  settings.innerHTML = settingsHTML;
-  
-  // Append panels after the header element
-  const header = app.querySelector('.header');
-  if (header) {
-    app.insertBefore(controls, mapContainer);
-    app.insertBefore(routeInfo, mapContainer);
-    app.insertBefore(settings, mapContainer);
-  } else {
-    // If no header, just append all panels
-    app.appendChild(controls);
-    app.appendChild(routeInfo);
-    app.appendChild(settings);
-  }
+  // Mount panels into predefined sidebar containers
+  controlsContainer.innerHTML = controlsHTML;
+  routeInfoContainer.innerHTML = routeInfoHTML;
+  settingsContainer.innerHTML = settingsHTML;
   
   // Initialize map
   await mapComponent.init('map');
@@ -145,8 +134,8 @@ function setupEventListeners(): void {
   // Map click handler for adding waypoints
   const map = mapComponent.getMap();
   if (map) {
-    map.on('click', async (e: L.MouseEvent) => {
-      const latlng = map.containerPointToLatLng({ x: e.clientX, y: e.clientY });
+    map.on('click', async (e: L.LeafletMouseEvent) => {
+      const latlng = e.latlng;
       
       // Update waypoint inputs
       const startPointEl = document.getElementById('start-point') as HTMLInputElement;

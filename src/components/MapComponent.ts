@@ -1,6 +1,6 @@
 import 'leaflet';
 import L from 'leaflet';
-// import 'leaflet/dist/leaflet.css';
+// Leaflet CSS is loaded from index.html to avoid TS side-effect import typing issues.
 import { Route } from '../types';
 
 export class MapComponent {
@@ -37,6 +37,15 @@ export class MapComponent {
 
       // Add custom markers for waypoints
       this.setupWaypointMarkers();
+
+      // Ensure map computes correct dimensions after dynamic layout updates
+      setTimeout(() => {
+        this.map?.invalidateSize();
+      }, 0);
+
+      window.addEventListener('resize', () => {
+        this.map?.invalidateSize();
+      });
 
       console.log('Map initialized successfully');
     } catch (error) {
