@@ -201,7 +201,10 @@ function setupEventListeners(): void {
       
       // Add waypoint to planner
       routePlanner.addWaypoint([latlng.lat, latlng.lng]);
-      
+
+      // Add marker to map
+      mapComponent.addWaypointMarker([latlng.lat, latlng.lng]);
+
       // Update status
       const waypoints = routePlanner.getWaypoints();
       const statusEl = document.getElementById('route-status');

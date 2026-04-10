@@ -122,16 +122,26 @@ export class MapComponent {
    * Add a waypoint marker to the map
    */
   addWaypointMarker(location: [number, number]): L.Marker {
-    if (!this.waypointsLayer || !this.map) {
-      return L.marker(location);
+    // Determine where to add the marker: prefer waypointsLayer, fallback to map
+    const targetLayer = this.waypointsLayer || this.map;
+
+    // Create marker and add it to the determined layer
+    if (!targetLayer) {
+      throw new Error('Map not initialized');
     }
+    const marker = L.marker(location).addTo(targetLayer);
 
-    const marker = L.marker(location, {
-      icon: this.createCustomIcon(),
-    }).addTo(this.waypointsLayer);
-
+    // Bind popup and event listener using the provided location coordinates
+    const popupContent = `
+      <div style="min-width: 150px;">
+        <strong>Waypoint</strong><br/>
+        Lat: ${location[0].toFixed(4)}<br/>
+        Lng: ${location[1].toFixed(4)}
+      </div>
+    `;
+    marker.bindPopup(popupContent);
     marker.on('click', () => {
-      console.log('Waypoint clicked:', location);
+      // Popup is now bound and will show on click
     });
 
     return marker;
@@ -147,18 +157,40 @@ export class MapComponent {
   }
 
   /**
-   * Create custom icon for waypoints
+   * Update all waypoint markers based on a list of coordinates.
+   * This clears existing markers and adds new ones with popups.
+   * @param locations Array of [lat, lng] coordinates for waypoints.
    */
-  private createCustomIcon(): L.Icon {
-    return new L.Icon({
-      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/markers-png/red.png',
-      shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [1, -34],
-      shadowSize: [41, 41],
+  updateWaypoints(locations: [number, number][]): void {
+    this.clearWaypointMarkers();
+    if (!this.map) {
+      return;
+    }
+
+    locations.forEach((location, index) => {
+      // Create marker and add it to the layer group or map
+      const targetLayer = this.waypointsLayer || this.map;
+      if (!targetLayer) {
+        return;
+      }
+      const marker = L.marker(location).addTo(targetLayer);
+
+      // Bind popup and event listener immediately after creation
+      const popupContent = `
+        <div style="min-width: 150px;">
+          <strong>Waypoint ${index + 1}</strong><br/>
+          Lat: ${location[0].toFixed(4)}<br/>
+          Lng: ${location[1].toFixed(4)}
+        </div>
+      `;
+      marker.bindPopup(popupContent);
+      marker.on('click', () => {
+        // Popup is now bound and will show on click
+      });
     });
   }
+
+
 
   /**
    * Fit map to show all waypoints and route
