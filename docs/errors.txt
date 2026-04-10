@@ -1,15 +1,15 @@
 
-> cardio-planner@0.1.0 build
-> tsc && vite build
+---When calculating route---
 
-src/main.ts(21,3): error TS18047: 'app' is possibly 'null'.
-src/main.ts(117,18): error TS18047: 'app' is possibly 'null'.
-src/main.ts(119,5): error TS18047: 'app' is possibly 'null'.
-src/main.ts(120,5): error TS18047: 'app' is possibly 'null'.
-src/main.ts(121,5): error TS18047: 'app' is possibly 'null'.
-src/main.ts(124,5): error TS18047: 'app' is possibly 'null'.
-src/main.ts(125,5): error TS18047: 'app' is possibly 'null'.
-src/main.ts(126,5): error TS18047: 'app' is possibly 'null'.
-src/main.ts(148,33): error TS2694: Namespace '"/home/xptm/Programming/cardio-planner/node_modules/@types/leaflet/index"' has no exported member 'MouseEvent'.
-src/main.ts(149,49): error TS2345: Argument of type '{ x: any; y: any; }' is not assignable to parameter of type 'PointExpression'.
-  Type '{ x: any; y: any; }' is missing the following properties from type 'Point': clone, add, subtract, divideBy, and 10 more.
+RoutePlanner.ts:64  GET https://router.project-osrm.org/route/v2/driving/-65.64664558750961,18.2553198104693;-65.64329664736864,18.25456548073301;-65.63999064235767,18.253790760296873;-65.6366846373467,18.2551567124255;-65.63419439980599,18.25584987805397;-65.63516044023126,18.260171907218577;-65.63653436439166,18.263331813298976;-65.63846644524223,18.265227729342985;-65.64123576112804,18.26428996700575;-65.64329664736864,18.26104853208842;-65.64591569029939,18.257766262748387;-65.64643091185955,18.25519748695081?overview=full&geometries=geojson 400 (Bad Request)
+calculateRoute @ RoutePlanner.ts:64
+(anonymous) @ main.ts:220
+RoutePlanner.ts:94 Error calculating route: Error: OSRM API error: 400
+    at RoutePlanner.calculateRoute (RoutePlanner.ts:67:15)
+    at async HTMLButtonElement.<anonymous> (main.ts:220:21)
+calculateRoute @ RoutePlanner.ts:94
+await in calculateRoute
+(anonymous) @ main.ts:220
+main.ts:235 Error calculating route: Error: OSRM API error: 400
+    at RoutePlanner.calculateRoute (RoutePlanner.ts:67:15)
+    at async HTMLButtonElement.<anonymous> (main.ts:220:21)
