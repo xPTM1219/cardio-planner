@@ -21,3 +21,6 @@ npm run build
 npm run dev
 ```
 
+## Resources
+
+* See the published app, [Cardio Planner](https://xptm1219.github.io/cardio-planner/)
