@@ -8,6 +8,8 @@ export class MapComponent {
   private map: L.Map | null = null;
   private routeLayer: L.Polyline | null = null;
   private waypointsLayer: L.LayerGroup | null = null;
+  private waypointsLine: L.Polyline | null = null;
+  private waypoints: [number, number][] = [];
   private settings: { units: 'metric' | 'imperial'; fitnessLevel: 'casual' | 'moderate' | 'active' } = {
     units: 'metric',
     fitnessLevel: 'moderate',
@@ -69,6 +71,22 @@ export class MapComponent {
   }
 
   /**
+   * Update the line connecting waypoints
+   */
+  private updateWaypointsLine(): void {
+    if (this.waypointsLine && this.map) {
+      this.map.removeLayer(this.waypointsLine);
+    }
+    if (this.waypoints.length > 1) {
+      const line = L.polyline(this.waypoints, { color: 'blue', weight: 2 });
+      this.map?.addLayer(line);
+      this.waypointsLine = line;
+    } else {
+      this.waypointsLine = null;
+    }
+  }
+
+  /**
    * Render a route on the map
    */
   renderRoute(route: Route): void {
@@ -121,7 +139,7 @@ export class MapComponent {
   /**
    * Add a waypoint marker to the map
    */
-  addWaypointMarker(location: [number, number]): L.Marker {
+  addWaypointMarker(location: [number, number]): L.CircleMarker {
     // Determine where to add the marker: prefer waypointsLayer, fallback to map
     const targetLayer = this.waypointsLayer || this.map;
 
@@ -129,7 +147,7 @@ export class MapComponent {
     if (!targetLayer) {
       throw new Error('Map not initialized');
     }
-    const marker = L.marker(location).addTo(targetLayer);
+    const marker = L.circleMarker(location, { color: 'red', radius: 5 }).addTo(targetLayer);
 
     // Bind popup and event listener using the provided location coordinates
     const popupContent = `
@@ -144,6 +162,10 @@ export class MapComponent {
       // Popup is now bound and will show on click
     });
 
+    // Add to waypoints list and update the connecting line
+    this.waypoints.push(location);
+    this.updateWaypointsLine();
+
     return marker;
   }
 
@@ -154,6 +176,11 @@ export class MapComponent {
     if (this.waypointsLayer) {
       this.waypointsLayer.clearLayers();
     }
+    if (this.waypointsLine && this.map) {
+      this.map.removeLayer(this.waypointsLine);
+      this.waypointsLine = null;
+    }
+    this.waypoints = [];
   }
 
   /**
@@ -163,6 +190,7 @@ export class MapComponent {
    */
   updateWaypoints(locations: [number, number][]): void {
     this.clearWaypointMarkers();
+    this.waypoints = locations; // Update the waypoints list
     if (!this.map) {
       return;
     }
@@ -173,7 +201,7 @@ export class MapComponent {
       if (!targetLayer) {
         return;
       }
-      const marker = L.marker(location).addTo(targetLayer);
+      const marker = L.circleMarker(location, { color: 'red', radius: 5 }).addTo(targetLayer);
 
       // Bind popup and event listener immediately after creation
       const popupContent = `
@@ -188,6 +216,9 @@ export class MapComponent {
         // Popup is now bound and will show on click
       });
     });
+
+    // Update the connecting line
+    this.updateWaypointsLine();
   }
 
 
@@ -237,5 +268,7 @@ export class MapComponent {
     }
     this.routeLayer = null;
     this.waypointsLayer = null;
+    this.waypointsLine = null;
+    this.waypoints = [];
   }
 }

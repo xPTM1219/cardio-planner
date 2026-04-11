@@ -1,6 +1,23 @@
-import { Route, Waypoint, GeoJSONGeometry } from '../types';
+import { Route, Waypoint } from '../types';
 
-const OSRM_API_URL = 'https://router.project-osrm.org/route/v2/driving';
+// Haversine distance calculation
+function toRad(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function distanceMeters(a: [number, number], b: [number, number]): number {
+  const earthRadiusM = 6371e3;
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  return earthRadiusM * c;
+}
 
 export class RoutePlanner {
   private static instance: RoutePlanner;
@@ -20,6 +37,10 @@ export class RoutePlanner {
    * Add a waypoint to the route
    */
   addWaypoint(location: [number, number], name?: string): void {
+    if (this.waypoints.length >= 100) {
+      console.warn('Maximum of 100 waypoints allowed');
+      return;
+    }
     this.waypoints.push({ location, name });
   }
 
@@ -45,7 +66,7 @@ export class RoutePlanner {
   }
 
   /**
-   * Calculate route using OSRM API
+   * Calculate route using straight-line distance estimation
    */
   async calculateRoute(): Promise<Route | null> {
     if (this.waypoints.length < 2) {
@@ -54,36 +75,29 @@ export class RoutePlanner {
     }
 
     try {
-      // Format waypoints for OSRM API
-      const coords = this.waypoints.map(wp => `${wp.location[1]},${wp.location[0]}`).join(';');
-      
-      // Build API request URL
-      const url = `${OSRM_API_URL}/${coords}?overview=full&geometries=geojson`;
-
-      // Fetch route from OSRM
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`OSRM API error: ${response.status}`);
+      // Calculate total distance as sum of straight-line segments
+      let totalDistance = 0;
+      for (let i = 1; i < this.waypoints.length; i++) {
+        totalDistance += distanceMeters(this.waypoints[i - 1].location, this.waypoints[i].location);
       }
 
-      const data: { code: string; routes: Array<{ distance: number; duration: number; geometry: GeoJSONGeometry }> } = 
-        await response.json();
+      // Estimate duration assuming walking speed of 1.4 m/s (5 km/h)
+      const estimatedDuration = totalDistance / 1.4;
 
-      if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
-        throw new Error('No route found');
-      }
-
-      const routeData = data.routes[0];
+      // Create geometry as LineString with waypoint coordinates
+      const coordinates: [number, number][] = this.waypoints.map(wp => [wp.location[1], wp.location[0]]);
 
       // Create route object
       const route: Route = {
         id: Date.now().toString(),
-        name: `Route ${this.waypoints.length}`,
+        name: `Planned Route (${this.waypoints.length} waypoints)`,
         waypoints: this.waypoints,
-        distance: routeData.distance,
-        duration: routeData.duration,
-        geometry: routeData.geometry,
+        distance: totalDistance,
+        duration: estimatedDuration,
+        geometry: {
+          type: 'LineString',
+          coordinates,
+        },
         createdAt: new Date().toISOString(),
       };
 
