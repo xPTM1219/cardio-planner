@@ -92,7 +92,33 @@ export class StorageManager {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_ROUTES);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored) as Partial<Route>[];
+        const normalized: Route[] = parsed
+          .filter((route): route is Partial<Route> & { id: string; name: string; geometry: Route['geometry'] } => {
+            return Boolean(route?.id && route?.name && route?.geometry?.coordinates);
+          })
+          .map(route => {
+            const waypoints = Array.isArray(route.waypoints)
+              ? route.waypoints
+              : (route.geometry.coordinates || []).map((coord, index) => ({
+                  location: [coord[1], coord[0]] as [number, number],
+                  name: `Point ${index + 1}`,
+                }));
+
+            return {
+              id: route.id,
+              name: route.name,
+              waypoints,
+              distance: route.distance ?? 0,
+              duration: route.duration ?? 0,
+              geometry: route.geometry,
+              source: route.source ?? 'planned',
+              createdAt: route.createdAt ?? new Date().toISOString(),
+            };
+          });
+
+        localStorage.setItem(STORAGE_KEY_ROUTES, JSON.stringify(normalized));
+        return normalized;
       }
       return [];
     } catch (error) {

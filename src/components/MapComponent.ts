@@ -1,4 +1,3 @@
-import 'leaflet';
 import L from 'leaflet';
 // Leaflet CSS is loaded from index.html to avoid TS side-effect import typing issues.
 import { HomeLocation, Route } from '../types';
@@ -6,10 +5,13 @@ import { HomeLocation, Route } from '../types';
 export class MapComponent {
   private static instance: MapComponent;
   private map: L.Map | null = null;
-  private routeLayer: L.Polyline | null = null;
+  private plannedRouteLayer: L.Polyline | null = null;
+  private actualRouteLayer: L.Polyline | null = null;
   private waypointsLayer: L.LayerGroup | null = null;
   private waypointsLine: L.Polyline | null = null;
   private waypoints: [number, number][] = [];
+  private waypointMarkers: L.Marker[] = [];
+  private waypointMovedCallback: ((index: number, location: [number, number]) => void) | null = null;
   private settings: { units: 'metric' | 'imperial'; fitnessLevel: 'casual' | 'moderate' | 'active' } = {
     units: 'metric',
     fitnessLevel: 'moderate',
@@ -78,7 +80,7 @@ export class MapComponent {
       this.map.removeLayer(this.waypointsLine);
     }
     if (this.waypoints.length > 1) {
-      const line = L.polyline(this.waypoints, { color: 'blue', weight: 2 });
+      const line = L.polyline(this.waypoints, { color: '#2563eb', weight: 2, dashArray: '6, 6' });
       this.map?.addLayer(line);
       this.waypointsLine = line;
     } else {
@@ -86,38 +88,47 @@ export class MapComponent {
     }
   }
 
+  private toLatLngs(route: Route): [number, number][] {
+    return route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  }
+
   /**
    * Render a route on the map
    */
-  renderRoute(route: Route): void {
+  renderRoute(route: Route, kind: 'planned' | 'actual' = 'planned'): void {
     // Ensure map is initialized
     if (!this.map) {
       return;
     }
 
-    // Remove existing route if present
-    if (this.routeLayer) {
-      this.map.removeLayer(this.routeLayer);
+    const existingLayer = kind === 'planned' ? this.plannedRouteLayer : this.actualRouteLayer;
+    if (existingLayer) {
+      this.map.removeLayer(existingLayer);
     }
 
-    // Create polyline from route geometry
-    const coordinates = route.geometry.coordinates;
-    const polyline = L.polyline(coordinates, {
-      color: '#e74c3c',
-      weight: 4,
-      opacity: 0.8,
-      dashArray: '10, 10',
+    // Create polyline from route geometry [lon,lat] -> [lat,lng]
+    const latLngs = this.toLatLngs(route);
+    const polyline = L.polyline(latLngs, {
+      color: kind === 'planned' ? '#e74c3c' : '#22c55e',
+      weight: kind === 'planned' ? 4 : 5,
+      opacity: 0.85,
+      dashArray: kind === 'planned' ? '10, 10' : undefined,
     }).addTo(this.map);
 
-    this.routeLayer = polyline;
+    if (kind === 'planned') {
+      this.plannedRouteLayer = polyline;
+    } else {
+      this.actualRouteLayer = polyline;
+    }
 
     // Add popup with route info
     const distanceKm = (route.distance / 1000).toFixed(2);
     const durationMin = Math.round(route.duration / 60);
 
     const popupContent = `
-      <div style="min-width: 150px;">
+      <div style="min-width: 170px;">
         <strong>${route.name}</strong><br/>
+        Type: ${kind === 'planned' ? 'Planned' : 'Actual'}<br/>
         Distance: ${distanceKm} km<br/>
         Duration: ${durationMin} min
       </div>
@@ -130,16 +141,27 @@ export class MapComponent {
    * Remove route from map
    */
   clearRoute(): void {
-    if (this.routeLayer && this.map) {
-      this.map.removeLayer(this.routeLayer);
-      this.routeLayer = null;
+    if (this.plannedRouteLayer && this.map) {
+      this.map.removeLayer(this.plannedRouteLayer);
+      this.plannedRouteLayer = null;
+    }
+    if (this.actualRouteLayer && this.map) {
+      this.map.removeLayer(this.actualRouteLayer);
+      this.actualRouteLayer = null;
+    }
+  }
+
+  clearActualRoute(): void {
+    if (this.actualRouteLayer && this.map) {
+      this.map.removeLayer(this.actualRouteLayer);
+      this.actualRouteLayer = null;
     }
   }
 
   /**
    * Add a waypoint marker to the map
    */
-  addWaypointMarker(location: [number, number]): L.CircleMarker {
+  addWaypointMarker(location: [number, number], indexOverride?: number): L.Marker {
     // Determine where to add the marker: prefer waypointsLayer, fallback to map
     const targetLayer = this.waypointsLayer || this.map;
 
@@ -147,23 +169,45 @@ export class MapComponent {
     if (!targetLayer) {
       throw new Error('Map not initialized');
     }
-    const marker = L.circleMarker(location, { color: 'red', radius: 5 }).addTo(targetLayer);
+    const waypointIndex = indexOverride ?? this.waypoints.length;
+
+    const marker = L.marker(location, {
+      draggable: true,
+      title: `Waypoint ${waypointIndex + 1}`,
+    }).addTo(targetLayer);
 
     // Bind popup and event listener using the provided location coordinates
     const popupContent = `
       <div style="min-width: 150px;">
-        <strong>Waypoint</strong><br/>
+        <strong>Waypoint ${waypointIndex + 1}</strong><br/>
         Lat: ${location[0].toFixed(4)}<br/>
         Lng: ${location[1].toFixed(4)}
       </div>
     `;
     marker.bindPopup(popupContent);
-    marker.on('click', () => {
-      // Popup is now bound and will show on click
+    marker.on('dragend', (e: L.DragEndEvent) => {
+      const moved = (e.target as L.Marker).getLatLng();
+      const nextLocation: [number, number] = [moved.lat, moved.lng];
+      this.waypoints[waypointIndex] = nextLocation;
+      this.updateWaypointsLine();
+      this.waypointMovedCallback?.(waypointIndex, nextLocation);
+
+      marker.setPopupContent(`
+        <div style="min-width: 150px;">
+          <strong>Waypoint ${waypointIndex + 1}</strong><br/>
+          Lat: ${nextLocation[0].toFixed(4)}<br/>
+          Lng: ${nextLocation[1].toFixed(4)}
+        </div>
+      `);
     });
 
     // Add to waypoints list and update the connecting line
-    this.waypoints.push(location);
+    if (indexOverride === undefined) {
+      this.waypoints.push(location);
+    } else {
+      this.waypoints[indexOverride] = location;
+    }
+    this.waypointMarkers[waypointIndex] = marker;
     this.updateWaypointsLine();
 
     return marker;
@@ -181,6 +225,7 @@ export class MapComponent {
       this.waypointsLine = null;
     }
     this.waypoints = [];
+    this.waypointMarkers = [];
   }
 
   /**
@@ -190,31 +235,13 @@ export class MapComponent {
    */
   updateWaypoints(locations: [number, number][]): void {
     this.clearWaypointMarkers();
-    this.waypoints = locations; // Update the waypoints list
+    this.waypoints = [...locations];
     if (!this.map) {
       return;
     }
 
     locations.forEach((location, index) => {
-      // Create marker and add it to the layer group or map
-      const targetLayer = this.waypointsLayer || this.map;
-      if (!targetLayer) {
-        return;
-      }
-      const marker = L.circleMarker(location, { color: 'red', radius: 5 }).addTo(targetLayer);
-
-      // Bind popup and event listener immediately after creation
-      const popupContent = `
-        <div style="min-width: 150px;">
-          <strong>Waypoint ${index + 1}</strong><br/>
-          Lat: ${location[0].toFixed(4)}<br/>
-          Lng: ${location[1].toFixed(4)}
-        </div>
-      `;
-      marker.bindPopup(popupContent);
-      marker.on('click', () => {
-        // Popup is now bound and will show on click
-      });
+      this.addWaypointMarker(location, index);
     });
 
     // Update the connecting line
@@ -238,6 +265,10 @@ export class MapComponent {
    */
   getMap(): L.Map | null {
     return this.map;
+  }
+
+  setWaypointMovedCallback(callback: ((index: number, location: [number, number]) => void) | null): void {
+    this.waypointMovedCallback = callback;
   }
 
   /**
@@ -266,9 +297,12 @@ export class MapComponent {
       this.map.remove();
       this.map = null;
     }
-    this.routeLayer = null;
+    this.plannedRouteLayer = null;
+    this.actualRouteLayer = null;
     this.waypointsLayer = null;
     this.waypointsLine = null;
     this.waypoints = [];
+    this.waypointMarkers = [];
+    this.waypointMovedCallback = null;
   }
 }

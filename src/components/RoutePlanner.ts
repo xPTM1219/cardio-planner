@@ -1,4 +1,4 @@
-import { Route, Waypoint } from '../types';
+import { Route, RouteComparison, RouteSource, Waypoint } from '../types';
 
 // Haversine distance calculation
 function toRad(value: number): number {
@@ -66,6 +66,58 @@ export class RoutePlanner {
   }
 
   /**
+   * Replace waypoint list
+   */
+  setWaypoints(locations: [number, number][]): void {
+    this.waypoints = locations.map((location, index) => ({
+      location,
+      name: `Waypoint ${index + 1}`,
+    }));
+  }
+
+  /**
+   * Update a waypoint in-place (used by draggable markers)
+   */
+  updateWaypoint(index: number, location: [number, number]): void {
+    if (!this.waypoints[index]) {
+      return;
+    }
+    this.waypoints[index].location = location;
+  }
+
+  private buildRoute(
+    points: [number, number][],
+    source: RouteSource,
+    name?: string,
+    durationOverrideSeconds?: number,
+  ): Route {
+    let totalDistance = 0;
+    for (let i = 1; i < points.length; i++) {
+      totalDistance += distanceMeters(points[i - 1], points[i]);
+    }
+
+    const estimatedDuration = durationOverrideSeconds ?? totalDistance / 1.4;
+    const coordinates: [number, number][] = points.map(([lat, lng]) => [lng, lat]);
+
+    return {
+      id: Date.now().toString(),
+      name: name ?? `${source === 'planned' ? 'Planned' : 'Recorded'} Route (${points.length} points)`,
+      waypoints: points.map((location, index) => ({
+        location,
+        name: `Point ${index + 1}`,
+      })),
+      distance: totalDistance,
+      duration: estimatedDuration,
+      geometry: {
+        type: 'LineString',
+        coordinates,
+      },
+      source,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  /**
    * Calculate route using straight-line distance estimation
    */
   async calculateRoute(): Promise<Route | null> {
@@ -75,31 +127,11 @@ export class RoutePlanner {
     }
 
     try {
-      // Calculate total distance as sum of straight-line segments
-      let totalDistance = 0;
-      for (let i = 1; i < this.waypoints.length; i++) {
-        totalDistance += distanceMeters(this.waypoints[i - 1].location, this.waypoints[i].location);
-      }
-
-      // Estimate duration assuming walking speed of 1.4 m/s (5 km/h)
-      const estimatedDuration = totalDistance / 1.4;
-
-      // Create geometry as LineString with waypoint coordinates
-      const coordinates: [number, number][] = this.waypoints.map(wp => [wp.location[1], wp.location[0]]);
-
-      // Create route object
-      const route: Route = {
-        id: Date.now().toString(),
-        name: `Planned Route (${this.waypoints.length} waypoints)`,
-        waypoints: this.waypoints,
-        distance: totalDistance,
-        duration: estimatedDuration,
-        geometry: {
-          type: 'LineString',
-          coordinates,
-        },
-        createdAt: new Date().toISOString(),
-      };
+      const route = this.buildRoute(
+        this.waypoints.map(wp => wp.location),
+        'planned',
+        `Planned Route (${this.waypoints.length} waypoints)`,
+      );
 
       this.currentRoute = route;
       return route;
@@ -108,6 +140,61 @@ export class RoutePlanner {
       console.error('Error calculating route:', error);
       throw error;
     }
+  }
+
+  /**
+   * Create a route from a recorded GPS track
+   */
+  createRouteFromTrack(track: [number, number][], name?: string, durationSeconds?: number): Route | null {
+    if (track.length < 2) {
+      return null;
+    }
+
+    const route = this.buildRoute(track, 'recorded', name, durationSeconds);
+    this.currentRoute = route;
+    return route;
+  }
+
+  /**
+   * Compare planned and actual routes
+   */
+  compareRoutes(planned: Route, actual: Route): RouteComparison {
+    const plannedPoints = planned.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+    const actualPoints = actual.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+
+    let totalDeviation = 0;
+    let maxDeviation = 0;
+
+    for (const actualPoint of actualPoints) {
+      let nearest = Number.POSITIVE_INFINITY;
+
+      for (const plannedPoint of plannedPoints) {
+        const d = distanceMeters(actualPoint, plannedPoint);
+        if (d < nearest) {
+          nearest = d;
+        }
+      }
+
+      if (Number.isFinite(nearest)) {
+        totalDeviation += nearest;
+        if (nearest > maxDeviation) {
+          maxDeviation = nearest;
+        }
+      }
+    }
+
+    const averageDeviation = actualPoints.length > 0 ? totalDeviation / actualPoints.length : 0;
+    const distanceDelta = actual.distance - planned.distance;
+    const distanceDeltaPercent = planned.distance > 0 ? (distanceDelta / planned.distance) * 100 : 0;
+
+    return {
+      plannedDistance: planned.distance,
+      actualDistance: actual.distance,
+      distanceDelta,
+      distanceDeltaPercent,
+      averageDeviation,
+      maxDeviation,
+    };
   }
 
   /**

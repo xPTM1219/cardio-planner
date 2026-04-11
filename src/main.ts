@@ -1,6 +1,7 @@
 import { MapComponent } from './components/MapComponent';
 import { RoutePlanner } from './components/RoutePlanner';
 import { StorageManager, UserSettings } from './components/StorageManager';
+import { Route } from './types';
 
 // DOM elements
 const app = document.getElementById('app');
@@ -14,7 +15,13 @@ const mapComponent = MapComponent.getInstance();
 const routePlanner = RoutePlanner.getInstance();
 const storageManager = StorageManager.getInstance();
 
-// Show loading overlay
+let savedRoutes: Route[] = [];
+let activePlannedRoute: Route | null = null;
+let activeActualRoute: Route | null = null;
+let geolocationWatchId: number | null = null;
+let recordingStartedAt: number | null = null;
+let recordedTrack: [number, number][] = [];
+
 function showLoading(): void {
   const loading = document.createElement('div');
   loading.className = 'loading-overlay';
@@ -33,7 +40,11 @@ function applyTheme(darkMode: boolean): void {
   document.body.classList.toggle('dark-mode', darkMode);
 }
 
-// Create control panel HTML
+function formatDistanceMeters(distanceMeters: number, units: 'metric' | 'imperial'): string {
+  const converted = routePlanner.convertDistance(distanceMeters, units);
+  return `${converted} ${units === 'metric' ? 'km' : 'mi'}`;
+}
+
 const controlsHTML = `
   <div class="control-panel">
     <h2>Route Planner</h2>
@@ -50,6 +61,15 @@ const controlsHTML = `
     
     <button class="btn" id="calculate-btn">Calculate Route</button>
     <button class="btn btn-secondary" id="clear-btn">Clear All</button>
+
+    <div class="form-group" style="margin-top: 1rem;">
+      <label for="saved-routes">Saved Routes</label>
+      <select id="saved-routes">
+        <option value="">Select a saved route...</option>
+      </select>
+    </div>
+
+    <button class="btn btn-secondary" id="load-route-btn">Load as Planned Route</button>
     
     <div class="form-group" style="margin-top: 1rem;">
       <label for="route-name">Route Name</label>
@@ -57,18 +77,21 @@ const controlsHTML = `
     </div>
     
     <button class="btn btn-secondary" id="save-route-btn">Save Route</button>
+
+    <hr style="margin: 1rem 0;" />
+    <button class="btn" id="start-route-btn">Start Route</button>
+    <button class="btn btn-secondary" id="stop-route-btn" disabled>Stop Route</button>
   </div>
 `;
 
-// Create route info panel HTML
 const routeInfoHTML = `
   <div class="route-info">
     <h3>Route Information</h3>
     <p id="route-status" style="color: #666;">Click on the map to add waypoints...</p>
+    <div id="route-comparison" class="route-comparison" style="display: none;"></div>
   </div>
 `;
 
-// Create settings panel HTML
 const settingsHTML = `
   <div class="settings-panel">
     <h3>Settings</h3>
@@ -116,9 +139,57 @@ const settingsHTML = `
   </div>
 `;
 
-// Initialize UI
+function updateSavedRoutesDropdown(): void {
+  const savedRoutesSelect = document.getElementById('saved-routes') as HTMLSelectElement | null;
+  if (!savedRoutesSelect) {
+    return;
+  }
+
+  const selectedValue = savedRoutesSelect.value;
+  savedRoutesSelect.innerHTML = '<option value="">Select a saved route...</option>';
+
+  savedRoutes.forEach(route => {
+    const option = document.createElement('option');
+    option.value = route.id;
+    option.textContent = `${route.name} (${route.source})`;
+    savedRoutesSelect.appendChild(option);
+  });
+
+  if (selectedValue && savedRoutes.some(route => route.id === selectedValue)) {
+    savedRoutesSelect.value = selectedValue;
+  }
+}
+
+async function refreshSavedRoutes(): Promise<void> {
+  savedRoutes = await storageManager.loadRoutes();
+  updateSavedRoutesDropdown();
+}
+
+function renderComparison(units: 'metric' | 'imperial'): void {
+  const comparisonEl = document.getElementById('route-comparison') as HTMLDivElement | null;
+  if (!comparisonEl) {
+    return;
+  }
+
+  if (!activePlannedRoute || !activeActualRoute) {
+    comparisonEl.style.display = 'none';
+    comparisonEl.innerHTML = '';
+    return;
+  }
+
+  const comparison = routePlanner.compareRoutes(activePlannedRoute, activeActualRoute);
+  comparisonEl.style.display = 'block';
+  comparisonEl.innerHTML = `
+    <h4>Planned vs Actual</h4>
+    <p>Planned distance: ${formatDistanceMeters(comparison.plannedDistance, units)}</p>
+    <p>Actual distance: ${formatDistanceMeters(comparison.actualDistance, units)}</p>
+    <p>Distance delta: ${formatDistanceMeters(Math.abs(comparison.distanceDelta), units)} (${comparison.distanceDeltaPercent.toFixed(1)}%)</p>
+    <p>Avg deviation: ${Math.round(comparison.averageDeviation)} m</p>
+    <p>Max deviation: ${Math.round(comparison.maxDeviation)} m</p>
+  `;
+}
+
 async function initUI(): Promise<void> {
-  // Wait for DOM to be ready
   const mapContainer = document.getElementById('map');
   const controlsContainer = document.getElementById('controls');
   const routeInfoContainer = document.getElementById('route-info');
@@ -129,23 +200,19 @@ async function initUI(): Promise<void> {
   if (!controlsContainer || !routeInfoContainer || !settingsContainer) {
     throw new Error('UI containers not found');
   }
-  
-  // Show loading
+
   showLoading();
-  
-  // Hide loading after a short delay
   setTimeout(hideLoading, 500);
-  
-  // Mount panels into predefined sidebar containers
+
   controlsContainer.innerHTML = controlsHTML;
   routeInfoContainer.innerHTML = routeInfoHTML;
   settingsContainer.innerHTML = settingsHTML;
-  
-  // Initialize map
+
   await mapComponent.init('map');
 
-  // Load and apply persisted settings
   const savedSettings = await storageManager.loadSettings();
+  await refreshSavedRoutes();
+
   mapComponent.updateSettings({
     units: savedSettings.units,
     fitnessLevel: savedSettings.fitnessLevel,
@@ -167,16 +234,17 @@ async function initUI(): Promise<void> {
   if (homeZoomInput) homeZoomInput.value = String(savedSettings.homeLocation.zoom);
 
   applyTheme(savedSettings.darkMode);
-  
-  // Setup event listeners
   setupEventListeners();
 }
 
-// Setup event listeners
 function setupEventListeners(): void {
   const calculateBtn = document.getElementById('calculate-btn') as HTMLButtonElement;
   const clearBtn = document.getElementById('clear-btn') as HTMLButtonElement;
   const saveRouteBtn = document.getElementById('save-route-btn') as HTMLButtonElement;
+  const loadRouteBtn = document.getElementById('load-route-btn') as HTMLButtonElement;
+  const savedRoutesSelect = document.getElementById('saved-routes') as HTMLSelectElement;
+  const startRouteBtn = document.getElementById('start-route-btn') as HTMLButtonElement;
+  const stopRouteBtn = document.getElementById('stop-route-btn') as HTMLButtonElement;
   const unitsSelect = document.getElementById('units') as HTMLSelectElement;
   const fitnessLevelSelect = document.getElementById('fitness-level') as HTMLSelectElement;
   const darkModeToggle = document.getElementById('dark-mode-toggle') as HTMLInputElement;
@@ -185,27 +253,32 @@ function setupEventListeners(): void {
   const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement;
   const useCurrentViewBtn = document.getElementById('use-current-view-btn') as HTMLButtonElement;
   const saveSettingsBtn = document.getElementById('save-settings-btn') as HTMLButtonElement;
-  
-  // Map click handler for adding waypoints
+
+  mapComponent.setWaypointMovedCallback(async (index, location) => {
+    routePlanner.updateWaypoint(index, location);
+
+    const route = await routePlanner.calculateRoute();
+    if (route) {
+      activePlannedRoute = route;
+      mapComponent.renderRoute(route, 'planned');
+      renderComparison((unitsSelect?.value as 'metric' | 'imperial') || 'metric');
+    }
+  });
+
   const map = mapComponent.getMap();
   if (map) {
-    map.on('click', async (e: L.LeafletMouseEvent) => {
+    map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
       const latlng = e.latlng;
-      
-      // Update waypoint inputs
+
       const startPointEl = document.getElementById('start-point') as HTMLInputElement;
       const endPointEl = document.getElementById('end-point') as HTMLInputElement;
-      
+
       startPointEl.value = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
       endPointEl.value = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
-      
-      // Add waypoint to planner
-      routePlanner.addWaypoint([latlng.lat, latlng.lng]);
 
-      // Add marker to map
+      routePlanner.addWaypoint([latlng.lat, latlng.lng]);
       mapComponent.addWaypointMarker([latlng.lat, latlng.lng]);
 
-      // Update status
       const waypoints = routePlanner.getWaypoints();
       const statusEl = document.getElementById('route-status');
       if (statusEl) {
@@ -213,71 +286,77 @@ function setupEventListeners(): void {
       }
     });
   }
-  
-  // Calculate route button
+
   calculateBtn?.addEventListener('click', async () => {
     try {
       const route = await routePlanner.calculateRoute();
-      
+
       if (route) {
-        // Render route on map
-        mapComponent.renderRoute(route);
-        
-        // Update status
+        activePlannedRoute = route;
+        mapComponent.renderRoute(route, 'planned');
+
         const statusEl = document.getElementById('route-status');
         if (statusEl) {
           const units = unitsSelect?.value as 'metric' | 'imperial';
           const info = routePlanner.getRouteInfo(units);
           statusEl.textContent = info || 'No route information available.';
         }
+
+        renderComparison((unitsSelect?.value as 'metric' | 'imperial') || 'metric');
       }
     } catch (error) {
       console.error('Error calculating route:', error);
-      
+
       const statusEl = document.getElementById('route-status');
       if (statusEl) {
         statusEl.textContent = 'Error: Could not calculate route. Please try again.';
       }
     }
   });
-  
-  // Clear button
+
   clearBtn?.addEventListener('click', () => {
     routePlanner.clear();
+    activePlannedRoute = null;
+    activeActualRoute = null;
     mapComponent.clearRoute();
     mapComponent.clearWaypointMarkers();
-    
+
+    if (geolocationWatchId !== null) {
+      navigator.geolocation.clearWatch(geolocationWatchId);
+      geolocationWatchId = null;
+    }
+    recordedTrack = [];
+    recordingStartedAt = null;
+    startRouteBtn.disabled = false;
+    stopRouteBtn.disabled = true;
+
     const statusEl = document.getElementById('route-status');
     if (statusEl) {
       statusEl.textContent = 'Map cleared. Click on the map to add waypoints...';
     }
-    
-    // Clear inputs
+
     const startPointEl = document.getElementById('start-point') as HTMLInputElement;
     const endPointEl = document.getElementById('end-point') as HTMLInputElement;
-    
     startPointEl.value = '';
     endPointEl.value = '';
+
+    renderComparison((unitsSelect?.value as 'metric' | 'imperial') || 'metric');
   });
-  
-  // Save route button
+
   saveRouteBtn?.addEventListener('click', async () => {
     const routeNameInput = document.getElementById('route-name') as HTMLInputElement;
     const routeName = routeNameInput.value || `Route ${Date.now()}`;
-    
+
     try {
       const currentRoute = routePlanner.getCurrentRoute();
-      
+
       if (currentRoute) {
-        // Update route name
         currentRoute.name = routeName;
-        
-        // Save to storage
         await storageManager.saveRoute(currentRoute);
-        
-        // Clear input
+        await refreshSavedRoutes();
+
         routeNameInput.value = '';
-        
+
         const statusEl = document.getElementById('route-status');
         if (statusEl) {
           statusEl.textContent = `Route "${routeName}" saved successfully!`;
@@ -285,20 +364,136 @@ function setupEventListeners(): void {
       }
     } catch (error) {
       console.error('Error saving route:', error);
-      
+
       const statusEl = document.getElementById('route-status');
       if (statusEl) {
         statusEl.textContent = 'Error: Could not save route.';
       }
     }
   });
-  
-  // Units select change
+
+  loadRouteBtn?.addEventListener('click', () => {
+    const selectedId = savedRoutesSelect?.value;
+    if (!selectedId) {
+      return;
+    }
+
+    const selectedRoute = savedRoutes.find(route => route.id === selectedId);
+    if (!selectedRoute) {
+      return;
+    }
+
+    const waypointLocations = selectedRoute.waypoints.map(wp => wp.location);
+    routePlanner.setWaypoints(waypointLocations);
+    mapComponent.updateWaypoints(waypointLocations);
+    mapComponent.renderRoute(selectedRoute, 'planned');
+    activePlannedRoute = selectedRoute;
+
+    const statusEl = document.getElementById('route-status');
+    if (statusEl) {
+      statusEl.textContent = `Loaded "${selectedRoute.name}" with ${waypointLocations.length} points.`;
+    }
+
+    renderComparison((unitsSelect?.value as 'metric' | 'imperial') || 'metric');
+  });
+
+  startRouteBtn?.addEventListener('click', () => {
+    if (!navigator.geolocation) {
+      const statusEl = document.getElementById('route-status');
+      if (statusEl) {
+        statusEl.textContent = 'Geolocation is not available in this browser.';
+      }
+      return;
+    }
+
+    recordedTrack = [];
+    recordingStartedAt = Date.now();
+    mapComponent.clearActualRoute();
+
+    geolocationWatchId = navigator.geolocation.watchPosition(
+      position => {
+        const point: [number, number] = [position.coords.latitude, position.coords.longitude];
+        recordedTrack.push(point);
+
+        const liveRoute = routePlanner.createRouteFromTrack(recordedTrack, 'Recording in progress...');
+        if (liveRoute) {
+          activeActualRoute = liveRoute;
+          mapComponent.renderRoute(liveRoute, 'actual');
+        }
+
+        const statusEl = document.getElementById('route-status');
+        if (statusEl) {
+          statusEl.textContent = `Recording route... ${recordedTrack.length} point(s) captured.`;
+        }
+
+        renderComparison((unitsSelect?.value as 'metric' | 'imperial') || 'metric');
+      },
+      error => {
+        const statusEl = document.getElementById('route-status');
+        if (statusEl) {
+          statusEl.textContent = `Location error: ${error.message}`;
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 15000,
+      },
+    );
+
+    startRouteBtn.disabled = true;
+    stopRouteBtn.disabled = false;
+  });
+
+  stopRouteBtn?.addEventListener('click', async () => {
+    if (geolocationWatchId !== null) {
+      navigator.geolocation.clearWatch(geolocationWatchId);
+      geolocationWatchId = null;
+    }
+
+    startRouteBtn.disabled = false;
+    stopRouteBtn.disabled = true;
+
+    const durationSeconds = recordingStartedAt ? (Date.now() - recordingStartedAt) / 1000 : undefined;
+    recordingStartedAt = null;
+
+    const statusEl = document.getElementById('route-status');
+    const recordedRoute = routePlanner.createRouteFromTrack(
+      recordedTrack,
+      `Recorded Route ${new Date().toLocaleString()}`,
+      durationSeconds,
+    );
+
+    if (!recordedRoute) {
+      if (statusEl) {
+        statusEl.textContent = 'Recording stopped. Not enough points were captured to form a route.';
+      }
+      return;
+    }
+
+    activeActualRoute = recordedRoute;
+    mapComponent.renderRoute(recordedRoute, 'actual');
+
+    try {
+      await storageManager.saveRoute(recordedRoute);
+      await refreshSavedRoutes();
+      if (statusEl) {
+        statusEl.textContent = `Recorded route saved: "${recordedRoute.name}".`;
+      }
+    } catch (error) {
+      console.error('Error saving recorded route:', error);
+      if (statusEl) {
+        statusEl.textContent = 'Recorded route captured but failed to save.';
+      }
+    }
+
+    renderComparison((unitsSelect?.value as 'metric' | 'imperial') || 'metric');
+  });
+
   unitsSelect?.addEventListener('change', (e: Event) => {
     const units = (e.target as HTMLSelectElement).value as 'metric' | 'imperial';
     mapComponent.updateSettings({ units });
-    
-    // Update route info display
+
     const currentRoute = routePlanner.getCurrentRoute();
     if (currentRoute) {
       const statusEl = document.getElementById('route-status');
@@ -307,25 +502,22 @@ function setupEventListeners(): void {
         statusEl.textContent = info || 'No route information available.';
       }
     }
+
+    renderComparison(units);
   });
-  
-  // Fitness level select change
+
   fitnessLevelSelect?.addEventListener('change', (e: Event) => {
     const fitnessLevel = (e.target as HTMLSelectElement).value as 'casual' | 'moderate' | 'active';
     mapComponent.updateSettings({ fitnessLevel });
-    
-    // Save settings
     saveSettingsBtn?.click();
   });
 
-  // Dark mode toggle
   darkModeToggle?.addEventListener('change', (e: Event) => {
     const darkMode = (e.target as HTMLInputElement).checked;
     applyTheme(darkMode);
     saveSettingsBtn?.click();
   });
-  
-  // Save settings button
+
   useCurrentViewBtn?.addEventListener('click', () => {
     const map = mapComponent.getMap();
     if (!map) {
@@ -343,7 +535,6 @@ function setupEventListeners(): void {
     }
   });
 
-  // Save settings button
   saveSettingsBtn?.addEventListener('click', async () => {
     try {
       const units = unitsSelect?.value as 'metric' | 'imperial';
@@ -362,11 +553,8 @@ function setupEventListeners(): void {
       if (!Number.isFinite(zoom) || zoom < 1 || zoom > 19) {
         throw new Error('Zoom must be a number between 1 and 19.');
       }
-      
-      // Get current settings
+
       const currentSettings = storageManager.getSettings();
-      
-      // Update settings
       const newSettings: UserSettings = {
         name: currentSettings.name,
         units,
@@ -378,21 +566,19 @@ function setupEventListeners(): void {
           zoom,
         },
       };
-      
+
       await storageManager.saveSettings(newSettings);
-      
-      // Update map component settings
       mapComponent.updateSettings({ units, fitnessLevel });
       mapComponent.setHomeView(newSettings.homeLocation);
       applyTheme(darkMode);
-      
+
       const statusEl = document.getElementById('route-status');
       if (statusEl) {
         statusEl.textContent = 'Settings saved successfully!';
       }
     } catch (error) {
       console.error('Error saving settings:', error);
-      
+
       const statusEl = document.getElementById('route-status');
       if (statusEl) {
         statusEl.textContent = 'Error: Could not save settings.';
@@ -401,7 +587,6 @@ function setupEventListeners(): void {
   });
 }
 
-// Start the app
 initUI().catch(error => {
   console.error('Failed to initialize app:', error);
 });

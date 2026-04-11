@@ -17,6 +17,8 @@ export interface Waypoint {
   name?: string;
 }
 
+export type RouteSource = 'planned' | 'recorded';
+
 export interface Route {
   id: string;
   name: string;
@@ -24,7 +26,17 @@ export interface Route {
   distance: number; // in meters
   duration: number; // in seconds
   geometry: GeoJSONGeometry;
+  source: RouteSource;
   createdAt: string;
+}
+
+export interface RouteComparison {
+  plannedDistance: number;
+  actualDistance: number;
+  distanceDelta: number;
+  distanceDeltaPercent: number;
+  averageDeviation: number;
+  maxDeviation: number;
 }
 
 export interface GeoJSONGeometry {
