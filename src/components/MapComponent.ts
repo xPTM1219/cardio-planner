@@ -143,16 +143,21 @@ export class MapComponent {
     // Determine where to add the marker: prefer waypointsLayer, fallback to map
     const targetLayer = this.waypointsLayer || this.map;
 
+    // Add to waypoints list first to determine color
+    this.waypoints.push(location);
+
     // Create marker and add it to the determined layer
     if (!targetLayer) {
       throw new Error('Map not initialized');
     }
-    const marker = L.circleMarker(location, { color: 'red', radius: 5 }).addTo(targetLayer);
+    const color = this.waypoints.length === 1 ? 'green' : 'red';
+    const marker = L.circleMarker(location, { color, radius: 5 }).addTo(targetLayer);
 
     // Bind popup and event listener using the provided location coordinates
+    const label = this.waypoints.length === 1 ? 'Start Point' : 'End Point';
     const popupContent = `
       <div style="min-width: 150px;">
-        <strong>Waypoint</strong><br/>
+        <strong>${label}</strong><br/>
         Lat: ${location[0].toFixed(4)}<br/>
         Lng: ${location[1].toFixed(4)}
       </div>
@@ -162,8 +167,7 @@ export class MapComponent {
       // Popup is now bound and will show on click
     });
 
-    // Add to waypoints list and update the connecting line
-    this.waypoints.push(location);
+    // Update the connecting line
     this.updateWaypointsLine();
 
     return marker;
@@ -201,12 +205,24 @@ export class MapComponent {
       if (!targetLayer) {
         return;
       }
-      const marker = L.circleMarker(location, { color: 'red', radius: 5 }).addTo(targetLayer);
+      let color = 'blue';
+      if (index === 0) {
+        color = 'green';
+      } else if (index === locations.length - 1) {
+        color = 'red';
+      }
+      const marker = L.circleMarker(location, { color, radius: 5 }).addTo(targetLayer);
 
       // Bind popup and event listener immediately after creation
+      let label = `Waypoint ${index + 1}`;
+      if (index === 0) {
+        label = 'Start Point';
+      } else if (index === locations.length - 1) {
+        label = 'End Point';
+      }
       const popupContent = `
         <div style="min-width: 150px;">
-          <strong>Waypoint ${index + 1}</strong><br/>
+          <strong>${label}</strong><br/>
           Lat: ${location[0].toFixed(4)}<br/>
           Lng: ${location[1].toFixed(4)}
         </div>

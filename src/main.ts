@@ -205,6 +205,9 @@ function setupEventListeners(): void {
       // Add marker to map
       mapComponent.addWaypointMarker([latlng.lat, latlng.lng]);
 
+      // Update all markers with correct colors
+      mapComponent.updateWaypoints(routePlanner.getWaypoints().map(wp => wp.location));
+
       // Update status
       const waypoints = routePlanner.getWaypoints();
       const statusEl = document.getElementById('route-status');

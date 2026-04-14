@@ -32,8 +32,9 @@ body {
   overflow: hidden;
 }
 
-.sidebar {
-  width: min(420px, 100%);
+.left-sidebar,
+.right-sidebar {
+  width: 400px;
   overflow-y: auto;
 }
 
