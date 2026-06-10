@@ -37,7 +37,7 @@ export class RoutePlanner {
    * Add a waypoint to the route
    */
   addWaypoint(location: [number, number], name?: string): void {
-    if (this.waypoints.length >= 100) {
+    if (this.waypoints.length >= 500) {
       console.warn('Maximum of 100 waypoints allowed');
       return;
     }
@@ -56,6 +56,31 @@ export class RoutePlanner {
    */
   clearWaypoints(): void {
     this.waypoints = [];
+  }
+
+  /**
+   * Replace all waypoints with the provided locations (names cleared).
+   */
+  setWaypoints(locations: [number, number][]): void {
+    this.waypoints = locations.map((loc) => ({ location: loc }));
+  }
+
+  /**
+   * Remove waypoint at a specific index.
+   */
+  removeWaypointAt(index: number): void {
+    if (index >= 0 && index < this.waypoints.length) {
+      this.waypoints.splice(index, 1);
+    }
+  }
+
+  /**
+   * Update location of waypoint at a specific index.
+   */
+  updateWaypointLocation(index: number, location: [number, number]): void {
+    if (index >= 0 && index < this.waypoints.length) {
+      this.waypoints[index].location = location;
+    }
   }
 
   /**

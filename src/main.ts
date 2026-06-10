@@ -185,7 +185,21 @@ function setupEventListeners(): void {
   const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement;
   const useCurrentViewBtn = document.getElementById('use-current-view-btn') as HTMLButtonElement;
   const saveSettingsBtn = document.getElementById('save-settings-btn') as HTMLButtonElement;
-  
+
+  // Wire live waypoint changes (drag / delete) -> sync planner, clear stale route, update status
+  mapComponent.setWaypointsChangeHandler((locations) => {
+    routePlanner.setWaypoints(locations);
+    mapComponent.clearRoute();
+    const statusEl = document.getElementById('route-status');
+    if (statusEl) {
+      if (locations.length === 0) {
+        statusEl.textContent = 'Map cleared. Click on the map to add waypoints...';
+      } else {
+        statusEl.textContent = `${locations.length} waypoint(s). Drag markers to move, use marker popup to delete. Click "Calculate Route" to update.`;
+      }
+    }
+  });
+
   // Map click handler for adding waypoints
   const map = mapComponent.getMap();
   if (map) {
@@ -202,17 +216,14 @@ function setupEventListeners(): void {
       // Add waypoint to planner
       routePlanner.addWaypoint([latlng.lat, latlng.lng]);
 
-      // Add marker to map
+      // Add draggable/deletable marker to map (addWaypointMarker handles colors + line + notifications)
       mapComponent.addWaypointMarker([latlng.lat, latlng.lng]);
 
-      // Update all markers with correct colors
-      mapComponent.updateWaypoints(routePlanner.getWaypoints().map(wp => wp.location));
-
-      // Update status
+      // Update status (planner and map stay in sync via change handler too)
       const waypoints = routePlanner.getWaypoints();
       const statusEl = document.getElementById('route-status');
       if (statusEl) {
-        statusEl.textContent = `Added ${waypoints.length} waypoint(s). Click again to add more. Then click "Calculate Route".`;
+        statusEl.textContent = `Added ${waypoints.length} waypoint(s). Drag markers to move, use popup on marker to delete. Click "Calculate Route" to update.`;
       }
     });
   }
