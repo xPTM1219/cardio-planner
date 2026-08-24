@@ -1,0 +1,93 @@
+import type { TranslationKey } from './index';
+
+export const zhCN: Record<TranslationKey, string> = {
+  appLoading: '正在加载步行规划器...',
+  routePlannerTitle: '路线规划',
+  routeInformationTitle: '路线信息',
+  statusInitial: '点击地图以添加途经点...',
+
+  addressSearchLabel: '地址搜索',
+  addressSearchPlaceholder: '输入地址...',
+  addressSearchButton: '前往',
+  statusSearchEmptyQuery: '请输入要搜索的地址。',
+  statusSearching: '正在搜索“{query}”...',
+  statusNoResults: '没有找到与“{query}”相关的结果。',
+  statusFound: '已找到：{name}',
+  statusSearchError: '错误：地址搜索失败。请检查网络连接后重试。',
+
+  startPointLabel: '起点（点击地图）',
+  endPointLabel: '终点（点击地图）',
+  waypointAutoPlaceholder: '将自动填充',
+
+  calculateRouteButton: '计算路线',
+  clearAllButton: '全部清除',
+
+  routeNameLabel: '路线名称',
+  routeNamePlaceholder: '输入路线名称...',
+  saveRouteButton: '保存路线',
+
+  savedRoutesLabel: '已保存的路线',
+  noSavedRoutesOption: '暂无已保存的路线',
+  loadRouteButton: '加载路线',
+  deleteRouteButton: '删除路线',
+
+  statusCleared: '地图已清除。点击地图以添加途经点...',
+  statusWaypointsCount:
+    '{n} 个途经点。拖动标记可移动位置，使用标记弹窗可删除。点击“计算路线”进行更新。',
+  statusAddedWaypoints:
+    '已添加 {n} 个途经点。拖动标记可移动位置，使用标记弹窗可删除。点击“计算路线”进行更新。',
+  statusNeedTwoWaypoints: '至少需要 2 个途经点才能计算路线。',
+  statusNoRouteInfo: '暂无路线信息。',
+  statusCalculateError: '错误：无法计算路线，请重试。',
+  statusRouteSaved: '路线“{name}”保存成功！',
+  statusSaveRouteError: '错误：无法保存路线。',
+  statusRouteDeleted: '路线已删除。',
+  statusDeleteRouteError: '错误：无法删除路线。',
+  statusRouteLoaded: '已加载“{name}”。',
+  statusLoadRouteMissing: '错误：找不到所选路线。',
+  statusLoadRouteError: '错误：无法加载路线。',
+
+  settingsTitle: '设置',
+  unitsLabel: '单位',
+  unitsMetric: '公制（公里）',
+  unitsImperial: '英制（英里）',
+  languageLabel: '语言',
+  activityTypeLabel: '活动类型',
+  activityWalking: '步行',
+  activityJogging: '慢跑',
+  activityRunning: '跑步',
+  activityBicycling: '骑行',
+  customSpeedLabel: '自定义速度（可选——留空）',
+  customSpeedPlaceholder: '公里/小时或英里/小时',
+  customPaceLabel: '自定义配速（可选——留空）',
+  customPacePlaceholder: '每公里分钟数或每英里分钟数',
+  darkModeLabel: '深色模式',
+  homeLatLabel: '家庭位置纬度',
+  homeLngLabel: '家庭位置经度',
+  homeZoomLabel: '家庭位置缩放级别',
+  useCurrentViewButton: '使用当前地图视图',
+  saveSettingsButton: '保存设置',
+
+  statusCapturedView: '已捕获当前地图视图。点击“保存设置”以保留。',
+  errorLatitudeRange: '纬度必须是介于 -90 到 90 之间的数字。',
+  errorLongitudeRange: '经度必须是介于 -180 到 180 之间的数字。',
+  errorZoomRange: '缩放级别必须是介于 1 到 19 之间的数字。',
+  errorCustomSpeed: '自定义速度必须是正数。',
+  errorCustomPace: '自定义配速必须是正数。',
+  statusSettingsSaved: '设置保存成功！',
+  statusSettingsSaveError: '错误：无法保存设置。',
+
+  distanceLabel: '距离：',
+  durationLabel: '时长：',
+
+  basisYourPace: '按你的配速 {pace} {unit}',
+  basisYourSpeed: '按你的速度 {speed}',
+  basisActivityPace: '按{activity}速度 {speed}',
+  basisDefaultSpeed: '按默认速度 {speed}',
+
+  popupWaypoint: '途经点',
+  popupStartPoint: '起点',
+  popupEndPoint: '终点',
+  popupWaypointN: '途经点 {n}',
+  popupDeletePoint: '删除此点',
+};

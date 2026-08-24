@@ -2,6 +2,14 @@ import 'leaflet';
 import L from 'leaflet';
 // Leaflet CSS is loaded from index.html to avoid TS side-effect import typing issues.
 import { HomeLocation, Route } from '../types';
+import { DEFAULT_HOME_LOCATION } from './StorageManager';
+import { t } from '../i18n';
+
+function escapeHtml(value: string): string {
+  const div = document.createElement('div');
+  div.textContent = value;
+  return div.innerHTML;
+}
 
 export class MapComponent {
   private static instance: MapComponent;
@@ -11,13 +19,13 @@ export class MapComponent {
   private waypointsLine: L.Polyline | null = null;
   private waypointData: Array<{ location: [number, number]; marker: L.Marker }> = [];
   private onWaypointsChanged: ((locations: [number, number][]) => void) | null = null;
-  private settings: { units: 'metric' | 'imperial'; fitnessLevel: 'casual' | 'moderate' | 'active' } = {
+  private settings: { units: 'metric' | 'imperial' } = {
     units: 'metric',
-    fitnessLevel: 'moderate',
   };
 
   private constructor() {}
 
+  /** Returns the shared singleton instance. */
   public static getInstance(): MapComponent {
     if (!MapComponent.instance) {
       MapComponent.instance = new MapComponent();
@@ -26,16 +34,16 @@ export class MapComponent {
   }
 
   /**
-   * Initialize the map
+   * Initialize the Leaflet map with an OSM tile layer.
+   *
+   * @param containerId DOM id of the element to mount the map into.
+   * @param homeLocation Initial center/zoom; defaults to
+   *   {@link DEFAULT_HOME_LOCATION} when omitted.
+   * @throws When Leaflet cannot create the map.
    */
-  async init(containerId: string): Promise<void> {
+  async init(containerId: string, homeLocation: HomeLocation = DEFAULT_HOME_LOCATION): Promise<void> {
     try {
-      const defaultHome: HomeLocation = {
-        lat: 18.2644,
-        lng: -65.648,
-        zoom: 13,
-      };
-      this.map = L.map(containerId).setView([defaultHome.lat, defaultHome.lng], defaultHome.zoom);
+      this.map = L.map(containerId).setView([homeLocation.lat, homeLocation.lng], homeLocation.zoom);
 
       // Add OpenStreetMap tile layer
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -99,15 +107,22 @@ export class MapComponent {
 
   /**
    * Register a handler called when waypoints are added, removed, or moved (drag).
+   *
+   * @param handler Receives the current ordered list of `[lat, lon]` locations.
    */
   setWaypointsChangeHandler(handler: (locations: [number, number][]) => void): void {
     this.onWaypointsChanged = handler;
   }
 
   /**
-   * Render a route on the map
+   * Render a route on the map as a dashed polyline with an info popup.
+   * Any previously rendered route is replaced.
+   *
+   * @param route Route to draw (geometry, name, distance, duration).
+   * @param options.basisText Plain-text speed basis appended to the popup,
+   *   e.g. "at your pace 6:30 min/km".
    */
-  renderRoute(route: Route): void {
+  renderRoute(route: Route, options?: { basisText?: string }): void {
     // Ensure map is initialized
     if (!this.map) {
       return;
@@ -130,23 +145,28 @@ export class MapComponent {
     this.routeLayer = polyline;
 
     // Add popup with route info
-    const distanceKm = (route.distance / 1000).toFixed(2);
+    const metric = this.settings.units === 'metric';
+    const distance = metric
+      ? Math.round((route.distance / 1000) * 100) / 100
+      : Math.round(route.distance * 0.000621371 * 100) / 100;
+    const unitLabel = metric ? 'km' : 'mi';
     const durationMin = Math.round(route.duration / 60);
+    const hours = Math.floor(durationMin / 60);
+    const durationLabel = hours > 0 ? `${hours}h ${durationMin % 60}m` : `${durationMin} min`;
+    const basisLine = options?.basisText ? `<br/>${escapeHtml(options.basisText)}` : '';
 
     const popupContent = `
       <div style="min-width: 150px;">
-        <strong>${route.name}</strong><br/>
-        Distance: ${distanceKm} km<br/>
-        Duration: ${durationMin} min
+        <strong>${escapeHtml(route.name)}</strong><br/>
+        Distance: ${distance} ${unitLabel}<br/>
+        Duration: ${durationLabel}${basisLine}
       </div>
     `;
 
     polyline.bindPopup(popupContent);
   }
 
-  /**
-   * Remove route from map
-   */
+  /** Remove the rendered route polyline from the map, if present. */
   clearRoute(): void {
     if (this.routeLayer && this.map) {
       this.map.removeLayer(this.routeLayer);
@@ -185,10 +205,10 @@ export class MapComponent {
 
     const initialPopup = `
       <div style="min-width:150px;">
-        <strong>Waypoint</strong><br/>
+        <strong>${t('popupWaypoint')}</strong><br/>
         Lat: ${location[0].toFixed(4)}<br/>
         Lng: ${location[1].toFixed(4)}<br/>
-        <a href="#" class="delete-waypoint-btn" style="color:#c00;text-decoration:underline;">Delete this point</a>
+        <a href="#" class="delete-waypoint-btn" style="color:#c00;text-decoration:underline;">${t('popupDeletePoint')}</a>
       </div>
     `;
     marker.bindPopup(initialPopup);
@@ -218,7 +238,7 @@ export class MapComponent {
     marker.on('popupopen', (ev: L.PopupEvent) => {
       const popupEl = ev.popup.getElement();
       if (!popupEl) return;
-      const btn = popupEl.querySelector('.delete-waypoint-btn') as HTMLElement | null;
+      const btn = popupEl.querySelector<HTMLElement>('.delete-waypoint-btn');
       if (btn) {
         btn.onclick = (e) => {
           e.preventDefault();
@@ -235,7 +255,11 @@ export class MapComponent {
   }
 
   /**
-   * Add a single waypoint marker (draggable, deletable via popup). Refreshes colors/line and notifies.
+   * Add a single waypoint marker (draggable, deletable via popup).
+   * Refreshes marker colors/line and notifies the change handler.
+   *
+   * @param location `[lat, lon]` coordinate for the new waypoint.
+   * @returns The created Leaflet marker.
    */
   addWaypointMarker(location: [number, number]): L.Marker {
     const marker = this.addWaypointInternal(location);
@@ -252,7 +276,8 @@ export class MapComponent {
   }
 
   /**
-   * Remove waypoint at index. Updates visuals and notifies listeners.
+   * Remove the waypoint at an index. Updates visuals and notifies listeners.
+   * @param index Zero-based position; out-of-range values are ignored.
    */
   removeWaypoint(index: number): void {
     if (index < 0 || index >= this.waypointData.length) return;
@@ -277,15 +302,15 @@ export class MapComponent {
       entry.marker.setIcon(this.createWaypointIcon(color));
 
       const loc = entry.location;
-      let label = `Waypoint ${i + 1}`;
-      if (isFirst) label = 'Start Point';
-      if (isLast) label = 'End Point';
+      let label = t('popupWaypointN', { n: i + 1 });
+      if (isFirst) label = t('popupStartPoint');
+      if (isLast) label = t('popupEndPoint');
       const popupContent = `
         <div style="min-width:150px;">
           <strong>${label}</strong><br/>
           Lat: ${loc[0].toFixed(4)}<br/>
           Lng: ${loc[1].toFixed(4)}<br/>
-          <a href="#" class="delete-waypoint-btn" style="color:#c00;text-decoration:underline;">Delete this point</a>
+          <a href="#" class="delete-waypoint-btn" style="color:#c00;text-decoration:underline;">${t('popupDeletePoint')}</a>
         </div>
       `;
       entry.marker.setPopupContent(popupContent);
@@ -293,8 +318,15 @@ export class MapComponent {
   }
 
   /**
-    * Remove all waypoint markers
-    */
+   * Re-render marker popup labels (e.g. after a language change).
+   */
+  refreshMarkerLabels(): void {
+    this.refreshAllMarkerStyles();
+  }
+
+  /**
+   * Remove all waypoint markers and the connecting line, then notify listeners.
+   */
   clearWaypointMarkers(): void {
     const had = this.waypointData.length > 0;
     if (this.waypointsLayer) {
@@ -313,10 +345,11 @@ export class MapComponent {
   }
 
   /**
-    * Update all waypoint markers based on a list of coordinates.
-    * This clears existing markers and adds new draggable/deletable ones.
-    * @param locations Array of [lat, lng] coordinates for waypoints.
-    */
+   * Replace all waypoint markers with draggable/deletable ones built from
+   * `locations`, then refresh visuals and notify listeners.
+   *
+   * @param locations Ordered `[lat, lon]` coordinates; an empty list clears.
+   */
   updateWaypoints(locations: [number, number][]): void {
     this.clearWaypointMarkers();
     if (!this.map || locations.length === 0) {
@@ -331,7 +364,8 @@ export class MapComponent {
 
 
   /**
-   * Fit map to show all waypoints and route
+   * Fit the map view to show all given waypoints.
+   * @param waypoints `[lat, lon]` list; needs at least two points to act.
    */
   fitBounds(waypoints: [number, number][]): void {
     if (waypoints.length >= 2 && this.map) {
@@ -341,21 +375,33 @@ export class MapComponent {
   }
 
   /**
-   * Get the map instance
+   * Smoothly fly the map to a location without touching waypoints or routes.
+   * @param location `[lat, lon]` target center.
+   * @param zoom Target zoom level (address search uses 16).
+   */
+  flyToLocation(location: [number, number], zoom: number): void {
+    this.map?.flyTo(location, zoom);
+  }
+
+  /**
+   * Get the underlying Leaflet map instance.
+   * @returns The map, or `null` before {@link init} has completed.
    */
   getMap(): L.Map | null {
     return this.map;
   }
 
   /**
-   * Update settings (called when user changes preferences)
+   * Merge UI-relevant settings used when rendering popups.
+   * @param settings Partial settings; only `units` is currently consumed.
    */
   updateSettings(settings: Partial<typeof this.settings>): void {
     this.settings = { ...this.settings, ...settings };
   }
 
   /**
-   * Set the map view to a specific home location.
+   * Move the map view to a home location immediately (no animation).
+   * @param homeLocation Center coordinates and zoom level.
    */
   setHomeView(homeLocation: HomeLocation): void {
     if (!this.map) {
@@ -366,8 +412,9 @@ export class MapComponent {
   }
 
   /**
-    * Remove map from DOM
-    */
+   * Remove the map from the DOM and reset all internal layer state.
+   * The instance remains reusable after another {@link init} call.
+   */
   destroy(): void {
     if (this.map) {
       this.map.remove();

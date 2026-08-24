@@ -1,0 +1,93 @@
+import type { TranslationKey } from './index';
+
+export const zhTW: Record<TranslationKey, string> = {
+  appLoading: '正在載入步行規劃器...',
+  routePlannerTitle: '路線規劃',
+  routeInformationTitle: '路線資訊',
+  statusInitial: '點擊地圖以新增途經點...',
+
+  addressSearchLabel: '地址搜尋',
+  addressSearchPlaceholder: '輸入地址...',
+  addressSearchButton: '前往',
+  statusSearchEmptyQuery: '請輸入要搜尋的地址。',
+  statusSearching: '正在搜尋「{query}」...',
+  statusNoResults: '沒有找到與「{query}」相關的結果。',
+  statusFound: '已找到：{name}',
+  statusSearchError: '錯誤：地址搜尋失敗。請檢查網路連線後重試。',
+
+  startPointLabel: '起點（點擊地圖）',
+  endPointLabel: '終點（點擊地圖）',
+  waypointAutoPlaceholder: '將自動填入',
+
+  calculateRouteButton: '計算路線',
+  clearAllButton: '全部清除',
+
+  routeNameLabel: '路線名稱',
+  routeNamePlaceholder: '輸入路線名稱...',
+  saveRouteButton: '儲存路線',
+
+  savedRoutesLabel: '已儲存的路線',
+  noSavedRoutesOption: '暫無已儲存的路線',
+  loadRouteButton: '載入路線',
+  deleteRouteButton: '刪除路線',
+
+  statusCleared: '地圖已清除。點擊地圖以新增途經點...',
+  statusWaypointsCount:
+    '{n} 個途經點。拖曳標記可移動位置，使用標記彈出視窗可刪除。點擊「計算路線」進行更新。',
+  statusAddedWaypoints:
+    '已新增 {n} 個途經點。拖曳標記可移動位置，使用標記彈出視窗可刪除。點擊「計算路線」進行更新。',
+  statusNeedTwoWaypoints: '至少需要 2 個途經點才能計算路線。',
+  statusNoRouteInfo: '暫無路線資訊。',
+  statusCalculateError: '錯誤：無法計算路線，請重試。',
+  statusRouteSaved: '路線「{name}」儲存成功！',
+  statusSaveRouteError: '錯誤：無法儲存路線。',
+  statusRouteDeleted: '路線已刪除。',
+  statusDeleteRouteError: '錯誤：無法刪除路線。',
+  statusRouteLoaded: '已載入「{name}」。',
+  statusLoadRouteMissing: '錯誤：找不到所選路線。',
+  statusLoadRouteError: '錯誤：無法載入路線。',
+
+  settingsTitle: '設定',
+  unitsLabel: '單位',
+  unitsMetric: '公制（公里）',
+  unitsImperial: '英制（英里）',
+  languageLabel: '語言',
+  activityTypeLabel: '活動類型',
+  activityWalking: '步行',
+  activityJogging: '慢跑',
+  activityRunning: '跑步',
+  activityBicycling: '騎行',
+  customSpeedLabel: '自訂速度（可選——留空）',
+  customSpeedPlaceholder: '公里/小時或英里/小時',
+  customPaceLabel: '自訂配速（可選——留空）',
+  customPacePlaceholder: '每公里分鐘數或每英里分鐘數',
+  darkModeLabel: '深色模式',
+  homeLatLabel: '住家位置緯度',
+  homeLngLabel: '住家位置經度',
+  homeZoomLabel: '住家位置縮放層級',
+  useCurrentViewButton: '使用目前地圖檢視',
+  saveSettingsButton: '儲存設定',
+
+  statusCapturedView: '已擷取目前地圖檢視。點擊「儲存設定」以保留。',
+  errorLatitudeRange: '緯度必須是介於 -90 到 90 之間的數字。',
+  errorLongitudeRange: '經度必須是介於 -180 到 180 之間的數字。',
+  errorZoomRange: '縮放層級必須是介於 1 到 19 之間的數字。',
+  errorCustomSpeed: '自訂速度必須是正數。',
+  errorCustomPace: '自訂配速必須是正數。',
+  statusSettingsSaved: '設定儲存成功！',
+  statusSettingsSaveError: '錯誤：無法儲存設定。',
+
+  distanceLabel: '距離：',
+  durationLabel: '時長：',
+
+  basisYourPace: '依你的配速 {pace} {unit}',
+  basisYourSpeed: '依你的速度 {speed}',
+  basisActivityPace: '依{activity}速度 {speed}',
+  basisDefaultSpeed: '依預設速度 {speed}',
+
+  popupWaypoint: '途經點',
+  popupStartPoint: '起點',
+  popupEndPoint: '終點',
+  popupWaypointN: '途經點 {n}',
+  popupDeletePoint: '刪除此點',
+};

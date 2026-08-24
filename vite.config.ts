@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   base: '/cardio-planner/',
@@ -23,5 +23,8 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/osrm/, ''),
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
   },
 });

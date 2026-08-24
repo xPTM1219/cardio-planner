@@ -1,0 +1,93 @@
+import type { TranslationKey } from './index';
+
+export const es: Record<TranslationKey, string> = {
+  appLoading: 'Cargando el planificador...',
+  routePlannerTitle: 'Planificador de rutas',
+  routeInformationTitle: 'Información de la ruta',
+  statusInitial: 'Haz clic en el mapa para añadir puntos de paso...',
+
+  addressSearchLabel: 'Buscar dirección',
+  addressSearchPlaceholder: 'Introduce una dirección...',
+  addressSearchButton: 'Ir',
+  statusSearchEmptyQuery: 'Introduce una dirección para buscar.',
+  statusSearching: 'Buscando «{query}»...',
+  statusNoResults: 'Sin resultados para «{query}».',
+  statusFound: 'Encontrado: {name}',
+  statusSearchError: 'Error: falló la búsqueda. Comprueba tu conexión e inténtalo de nuevo.',
+
+  startPointLabel: 'Punto de inicio (clic en el mapa)',
+  endPointLabel: 'Punto final (clic en el mapa)',
+  waypointAutoPlaceholder: 'Se completará automáticamente',
+
+  calculateRouteButton: 'Calcular ruta',
+  clearAllButton: 'Borrar todo',
+
+  routeNameLabel: 'Nombre de la ruta',
+  routeNamePlaceholder: 'Escribe un nombre de ruta...',
+  saveRouteButton: 'Guardar ruta',
+
+  savedRoutesLabel: 'Rutas guardadas',
+  noSavedRoutesOption: 'No hay rutas guardadas',
+  loadRouteButton: 'Cargar ruta',
+  deleteRouteButton: 'Eliminar ruta',
+
+  statusCleared: 'Mapa borrado. Haz clic en el mapa para añadir puntos de paso...',
+  statusWaypointsCount:
+    '{n} punto(s) de paso. Arrastra los marcadores para moverlos; usa la ventana del marcador para eliminar. Pulsa «Calcular ruta» para actualizar.',
+  statusAddedWaypoints:
+    'Añadidos {n} punto(s) de paso. Arrastra los marcadores para moverlos; usa la ventana del marcador para eliminar. Pulsa «Calcular ruta» para actualizar.',
+  statusNeedTwoWaypoints: 'Se necesitan al menos 2 puntos de paso para calcular una ruta.',
+  statusNoRouteInfo: 'No hay información de la ruta disponible.',
+  statusCalculateError: 'Error: no se pudo calcular la ruta. Inténtalo de nuevo.',
+  statusRouteSaved: '¡Ruta «{name}» guardada correctamente!',
+  statusSaveRouteError: 'Error: no se pudo guardar la ruta.',
+  statusRouteDeleted: 'Ruta eliminada.',
+  statusDeleteRouteError: 'Error: no se pudo eliminar la ruta.',
+  statusRouteLoaded: '«{name}» cargada.',
+  statusLoadRouteMissing: 'Error: no se encontró la ruta seleccionada.',
+  statusLoadRouteError: 'Error: no se pudo cargar la ruta.',
+
+  settingsTitle: 'Ajustes',
+  unitsLabel: 'Unidades',
+  unitsMetric: 'Métrico (km)',
+  unitsImperial: 'Imperial (mi)',
+  languageLabel: 'Idioma',
+  activityTypeLabel: 'Tipo de actividad',
+  activityWalking: 'Caminata',
+  activityJogging: 'Trote',
+  activityRunning: 'Carrera',
+  activityBicycling: 'Bicicleta',
+  customSpeedLabel: 'Velocidad personalizada (opcional — dejar en blanco)',
+  customSpeedPlaceholder: 'km/h o mph',
+  customPaceLabel: 'Ritmo personalizado (opcional — dejar en blanco)',
+  customPacePlaceholder: 'min por km o min por mi',
+  darkModeLabel: 'Modo oscuro',
+  homeLatLabel: 'Latitud de la ubicación de inicio',
+  homeLngLabel: 'Longitud de la ubicación de inicio',
+  homeZoomLabel: 'Zoom de inicio',
+  useCurrentViewButton: 'Usar vista actual del mapa',
+  saveSettingsButton: 'Guardar ajustes',
+
+  statusCapturedView: 'Vista actual capturada. Pulsa «Guardar ajustes» para conservarla.',
+  errorLatitudeRange: 'La latitud debe ser un número entre -90 y 90.',
+  errorLongitudeRange: 'La longitud debe ser un número entre -180 y 180.',
+  errorZoomRange: 'El zoom debe ser un número entre 1 y 19.',
+  errorCustomSpeed: 'La velocidad personalizada debe ser un número positivo.',
+  errorCustomPace: 'El ritmo personalizado debe ser un número positivo.',
+  statusSettingsSaved: '¡Ajustes guardados correctamente!',
+  statusSettingsSaveError: 'Error: no se pudieron guardar los ajustes.',
+
+  distanceLabel: 'Distancia:',
+  durationLabel: 'Duración:',
+
+  basisYourPace: 'a tu ritmo de {pace} {unit}',
+  basisYourSpeed: 'a tu velocidad de {speed}',
+  basisActivityPace: 'a {speed} ritmo de {activity}',
+  basisDefaultSpeed: 'a la velocidad predeterminada de {speed}',
+
+  popupWaypoint: 'Punto de paso',
+  popupStartPoint: 'Punto de inicio',
+  popupEndPoint: 'Punto final',
+  popupWaypointN: 'Punto de paso {n}',
+  popupDeletePoint: 'Eliminar este punto',
+};

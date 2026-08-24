@@ -1,13 +1,71 @@
-import { HomeLocation, UserSettings, Route } from '../types';
+import { ActivityType, HomeLocation, UserSettings, Route } from '../types';
+import { detectBrowserLanguage, Language } from '../i18n';
 
 const STORAGE_KEY_SETTINGS = 'walk_planner_settings';
 const STORAGE_KEY_ROUTES = 'walk_planner_routes';
-const DEFAULT_HOME_LOCATION: HomeLocation = {
-  // Ceiba, Puerto Rico
-  lat: 18.2644,
-  lng: -65.648,
-  zoom: 13,
+
+/** Default home view: North America zoomed out. Single source of truth. */
+export const DEFAULT_HOME_LOCATION: HomeLocation = {
+  lat: 45,
+  lng: -100,
+  zoom: 3,
 };
+
+export function getDefaultSettings(): UserSettings {
+  return {
+    name: '',
+    units: 'metric',
+    language: 'en',
+    activityType: 'walking',
+    homeLocation: DEFAULT_HOME_LOCATION,
+    darkMode: false,
+  };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isActivityType(value: unknown): value is ActivityType {
+  return value === 'walking' || value === 'jogging' || value === 'running' || value === 'bicycling';
+}
+
+function isLanguage(value: unknown): value is Language {
+  return value === 'en' || value === 'es' || value === 'zh-CN' || value === 'zh-TW';
+}
+
+function normalizeOptionalPositiveNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) && value > 0 ? value : undefined;
+}
+
+function normalizeHomeLocation(value: unknown): HomeLocation {
+  const raw = (typeof value === 'object' && value !== null ? value : {}) as Partial<HomeLocation>;
+  return {
+    lat: isFiniteNumber(raw.lat) && raw.lat >= -90 && raw.lat <= 90 ? raw.lat : DEFAULT_HOME_LOCATION.lat,
+    lng: isFiniteNumber(raw.lng) && raw.lng >= -180 && raw.lng <= 180 ? raw.lng : DEFAULT_HOME_LOCATION.lng,
+    zoom: isFiniteNumber(raw.zoom) && Number.isInteger(raw.zoom) && raw.zoom >= 1 && raw.zoom <= 19 ? raw.zoom : DEFAULT_HOME_LOCATION.zoom,
+  };
+}
+
+function normalizeSettings(parsed: Partial<UserSettings> | null): UserSettings {
+  if (!parsed || typeof parsed !== 'object') {
+    // First visit: seed the language from the browser locale.
+    return { ...getDefaultSettings(), language: detectBrowserLanguage() };
+  }
+  const defaults = getDefaultSettings();
+  return {
+    name: typeof parsed.name === 'string' ? parsed.name : defaults.name,
+    units: parsed.units === 'imperial' || parsed.units === 'metric' ? parsed.units : defaults.units,
+    // Unknown/missing languages fall back to the browser locale (then English).
+    language: isLanguage(parsed.language) ? parsed.language : detectBrowserLanguage(),
+    // Legacy `fitnessLevel` values are silently dropped by this normalization.
+    activityType: isActivityType(parsed.activityType) ? parsed.activityType : defaults.activityType,
+    customSpeed: normalizeOptionalPositiveNumber(parsed.customSpeed),
+    customPace: normalizeOptionalPositiveNumber(parsed.customPace),
+    homeLocation: normalizeHomeLocation(parsed.homeLocation),
+    darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : defaults.darkMode,
+  };
+}
 
 export class StorageManager {
   private static instance: StorageManager;
@@ -23,40 +81,38 @@ export class StorageManager {
   }
 
   /**
-   * Load user settings from localStorage
+   * Load user settings from localStorage.
+   * Corrupt or partial data never throws: each field is validated and
+   * falls back to its default independently.
    */
   async loadSettings(): Promise<UserSettings> {
+    let stored: string | null = null;
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      const defaultSettings: UserSettings = {
-        name: '',
-        units: 'metric',
-        fitnessLevel: 'moderate',
-        homeLocation: DEFAULT_HOME_LOCATION,
-        darkMode: false,
-      };
-
-      if (stored) {
-        const parsed = JSON.parse(stored) as Partial<UserSettings>;
-        this.settings = {
-          ...defaultSettings,
-          ...parsed,
-          homeLocation: parsed.homeLocation ?? defaultSettings.homeLocation,
-          darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : defaultSettings.darkMode,
-        };
-
-        // Persist normalized settings to support migration from older schema
-        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(this.settings));
-        return this.getSettings();
-      }
-
-      this.settings = defaultSettings;
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(defaultSettings));
-      return defaultSettings;
+      stored = localStorage.getItem(STORAGE_KEY_SETTINGS);
     } catch (error) {
-      console.error('Error loading settings:', error);
-      throw new Error('Failed to load settings from storage');
+      console.warn('Could not read settings from storage:', error);
     }
+
+    let parsed: Partial<UserSettings> | null = null;
+    if (stored) {
+      try {
+        parsed = JSON.parse(stored) as Partial<UserSettings>;
+      } catch (error) {
+        console.warn('Stored settings are corrupt; using defaults:', error);
+        parsed = null;
+      }
+    }
+
+    this.settings = normalizeSettings(parsed);
+
+    // Persist normalized settings to support migration from older schemas.
+    try {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(this.settings));
+    } catch (error) {
+      console.warn('Could not persist normalized settings:', error);
+    }
+
+    return this.settings;
   }
 
   /**
@@ -76,28 +132,36 @@ export class StorageManager {
    * Get current settings with fallback to defaults
    */
   getSettings(): UserSettings {
-    return this.settings ?? {
-      name: '',
-      units: 'metric',
-      fitnessLevel: 'moderate',
-      homeLocation: DEFAULT_HOME_LOCATION,
-      darkMode: false,
-    };
+    return this.settings ?? getDefaultSettings();
   }
 
   /**
-   * Load saved routes from localStorage
+   * Load saved routes from localStorage.
+   * Corrupt data is treated as an empty list instead of throwing.
    */
   async loadRoutes(): Promise<Route[]> {
+    let stored: string | null = null;
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_ROUTES);
-      if (stored) {
-        return JSON.parse(stored);
-      }
-      return [];
+      stored = localStorage.getItem(STORAGE_KEY_ROUTES);
     } catch (error) {
-      console.error('Error loading routes:', error);
-      throw new Error('Failed to load routes from storage');
+      console.warn('Could not read routes from storage:', error);
+      return [];
+    }
+
+    if (!stored) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(stored) as unknown;
+      if (!Array.isArray(parsed)) {
+        console.warn('Stored routes are corrupt (not an array); treating as empty.');
+        return [];
+      }
+      return parsed as Route[];
+    } catch (error) {
+      console.warn('Stored routes are corrupt; treating as empty:', error);
+      return [];
     }
   }
 
