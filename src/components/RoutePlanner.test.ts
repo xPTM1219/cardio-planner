@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { RoutePlanner } from './RoutePlanner';
+import { MAX_WAYPOINTS } from '../utils/waypoints';
+import { formatDuration } from '../utils/format';
 
 describe('RoutePlanner.convertDistance', () => {
   const planner = RoutePlanner.getInstance();
@@ -62,5 +64,77 @@ describe('RoutePlanner.calculateRoute durations', () => {
     const route = await planner.calculateRoute(-4);
 
     expect(route!.duration).toBeCloseTo(legMeters / (5 / 3.6), 6);
+  });
+});
+
+describe('RoutePlanner stale route handling', () => {
+  let planner: RoutePlanner;
+
+  beforeEach(async () => {
+    (RoutePlanner as unknown as { instance: undefined }).instance = undefined;
+    planner = RoutePlanner.getInstance();
+    planner.setWaypoints([
+      [0, 0],
+      [0, 1],
+    ]);
+    await planner.calculateRoute();
+  });
+
+  it('setWaypoints clears the current route', () => {
+    expect(planner.getCurrentRoute()).not.toBeNull();
+    planner.setWaypoints([
+      [0, 0],
+      [0, 2],
+    ]);
+    expect(planner.getCurrentRoute()).toBeNull();
+  });
+
+  it('add, remove, and move also clear the current route', async () => {
+    planner.addWaypoint([0, 3]);
+    expect(planner.getCurrentRoute()).toBeNull();
+
+    await planner.calculateRoute();
+    planner.removeWaypointAt(0);
+    expect(planner.getCurrentRoute()).toBeNull();
+
+    await planner.calculateRoute();
+    planner.updateWaypointLocation(0, [1, 1]);
+    expect(planner.getCurrentRoute()).toBeNull();
+  });
+
+  it('the route keeps its own copy of the waypoints', async () => {
+    const route = await planner.calculateRoute();
+    planner.updateWaypointLocation(0, [5, 5]);
+    expect(route!.waypoints[0].location).toEqual([0, 0]);
+  });
+});
+
+describe('RoutePlanner waypoint limit', () => {
+  beforeEach(() => {
+    (RoutePlanner as unknown as { instance: undefined }).instance = undefined;
+  });
+
+  it('refuses waypoints past MAX_WAYPOINTS', () => {
+    const planner = RoutePlanner.getInstance();
+    const full: [number, number][] = Array.from({ length: MAX_WAYPOINTS + 5 }, (_, i) => [0, i * 0.001]);
+    planner.setWaypoints(full);
+    expect(planner.getWaypoints()).toHaveLength(MAX_WAYPOINTS);
+    expect(planner.addWaypoint([1, 1])).toBe(false);
+    expect(planner.getWaypoints()).toHaveLength(MAX_WAYPOINTS);
+  });
+});
+
+describe('RoutePlanner.getRouteInfo', () => {
+  it('uses the shared duration format', async () => {
+    (RoutePlanner as unknown as { instance: undefined }).instance = undefined;
+    const planner = RoutePlanner.getInstance();
+    planner.setWaypoints([
+      [0, 0],
+      [0, 0.1],
+    ]);
+    const route = await planner.calculateRoute(5 / 3.6);
+    const info = planner.getRouteInfo('metric');
+    expect(info).toContain(`Duration: ${formatDuration(route!.duration)}`);
+    expect(info).toContain('Distance: 11.12 km');
   });
 });

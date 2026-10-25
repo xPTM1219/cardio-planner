@@ -34,6 +34,7 @@ export class GeocodingService {
 
   private constructor() {}
 
+  /** Returns the shared singleton instance. */
   public static getInstance(): GeocodingService {
     if (!GeocodingService.instance) {
       GeocodingService.instance = new GeocodingService();
@@ -44,16 +45,23 @@ export class GeocodingService {
   /**
    * Search for an address, returning up to five results ordered by relevance.
    * Returns an empty array when the query is blank or nothing matches.
+   *
+   * @param query Address or place name.
+   * @param language Optional language tag (for example `es`). Nominatim then
+   *   gives the place names in that language when it has them.
+   * @returns Parsed results; entries without valid coordinates are skipped.
+   * @throws {GeocodingError} On network failure, HTTP error, or invalid data.
    */
-  async search(query: string): Promise<GeocodingResult[]> {
+  async search(query: string, language?: string): Promise<GeocodingResult[]> {
     const trimmed = query.trim();
     if (!trimmed) {
       return [];
     }
 
+    const languageParam = language ? `&accept-language=${encodeURIComponent(language)}` : '';
     const url =
       `https://nominatim.openstreetmap.org/search` +
-      `?format=jsonv2&limit=5&q=${encodeURIComponent(trimmed)}`;
+      `?format=jsonv2&limit=5&q=${encodeURIComponent(trimmed)}${languageParam}`;
 
     let response: Response;
     try {

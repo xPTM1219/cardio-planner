@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { StorageManager, getDefaultSettings } from './StorageManager';
+import { StorageManager, getDefaultSettings, validateHomeLocation } from './StorageManager';
 import type { UserSettings } from '../types';
 
 describe('StorageManager', () => {
@@ -192,5 +192,64 @@ describe('StorageManager', () => {
 
     const routes = await manager.loadRoutes();
     expect(routes.map((r) => r.id)).toEqual(['r1', 'r3']);
+  });
+  describe('updateSettings', () => {
+    it('merges changes and keeps the other fields', async () => {
+      await manager.saveSettings({ ...getDefaultSettings(), units: 'imperial', customSpeed: 9 });
+
+      const updated = await manager.updateSettings({ activityType: 'running' });
+
+      expect(updated.activityType).toBe('running');
+      expect(updated.units).toBe('imperial');
+      expect(updated.customSpeed).toBe(9);
+    });
+
+    it('clears an optional value given as undefined', async () => {
+      await manager.saveSettings({ ...getDefaultSettings(), customSpeed: 9, customPace: 6 });
+
+      const updated = await manager.updateSettings({ customSpeed: undefined });
+
+      expect(updated.customSpeed).toBeUndefined();
+      expect(updated.customPace).toBe(6);
+    });
+
+    it('normalizes invalid values', async () => {
+      const updated = await manager.updateSettings({
+        customPace: -1,
+        homeLocation: { lat: 200, lng: 10, zoom: 3.5 },
+      });
+
+      expect(updated.customPace).toBeUndefined();
+      expect(updated.homeLocation).toEqual({ lat: 45, lng: 10, zoom: 3 });
+    });
+
+    it('persists the result', async () => {
+      await manager.updateSettings({ language: 'zh-TW', darkMode: true });
+
+      const stored = JSON.parse(localStorage.getItem('walk_planner_settings') ?? '{}') as Record<string, unknown>;
+      expect(stored.language).toBe('zh-TW');
+      expect(stored.darkMode).toBe(true);
+      expect(manager.getSettings().language).toBe('zh-TW');
+    });
+  });
+});
+
+describe('validateHomeLocation', () => {
+  it('accepts valid values, including the limits', () => {
+    expect(validateHomeLocation({ lat: 45, lng: -100, zoom: 3 })).toBeNull();
+    expect(validateHomeLocation({ lat: -90, lng: 180, zoom: 19 })).toBeNull();
+    expect(validateHomeLocation({ lat: 90, lng: -180, zoom: 1 })).toBeNull();
+  });
+
+  it('reports the first invalid field', () => {
+    expect(validateHomeLocation({ lat: 91, lng: 0, zoom: 3 })).toBe('errorLatitudeRange');
+    expect(validateHomeLocation({ lat: NaN, lng: 0, zoom: 3 })).toBe('errorLatitudeRange');
+    expect(validateHomeLocation({ lat: 0, lng: -181, zoom: 3 })).toBe('errorLongitudeRange');
+    expect(validateHomeLocation({ lat: 0, lng: 0, zoom: 0 })).toBe('errorZoomRange');
+    expect(validateHomeLocation({ lat: 0, lng: 0, zoom: 20 })).toBe('errorZoomRange');
+  });
+
+  it('rejects a zoom that is not a whole number', () => {
+    expect(validateHomeLocation({ lat: 0, lng: 0, zoom: 3.5 })).toBe('errorZoomRange');
   });
 });

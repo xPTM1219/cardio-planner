@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { setLanguage } from '../i18n';
 import {
   ACTIVITY_SPEEDS_KMH,
+  convertDistance,
+  fromDisplayPace,
+  fromDisplaySpeed,
+  toDisplayPace,
+  toDisplaySpeed,
+  unitLabels,
   formatPace,
   formatSpeedBasis,
   kmhToMph,
@@ -123,5 +130,56 @@ describe('formatting', () => {
     expect(formatSpeedBasis(resolveSpeed({ activityType: 'bicycling' }), 'imperial')).toBe(
       'at 12.4 mph bike pace'
     );
+  });
+});
+
+describe('translated speed basis', () => {
+  afterEach(() => {
+    setLanguage('en');
+  });
+
+  it('translates the activity word', () => {
+    setLanguage('es');
+    expect(formatSpeedBasis(resolveSpeed({ activityType: 'jogging' }), 'metric')).toBe('a 8.0 km/h, ritmo de trote');
+    setLanguage('zh-CN');
+    expect(formatSpeedBasis(resolveSpeed({ activityType: 'bicycling' }), 'metric')).toBe('按骑行速度 20.0 km/h');
+  });
+
+  it('shows the default speed in the active units', () => {
+    expect(formatSpeedBasis(resolveSpeed({}), 'imperial')).toBe('at default 3.1 mph');
+    expect(formatSpeedBasis(resolveSpeed({}), 'metric')).toBe('at default 5.0 km/h');
+  });
+});
+
+describe('distance and display conversions', () => {
+  it('converts meters to km or miles with two decimals', () => {
+    expect(convertDistance(1500, 'metric')).toBe(1.5);
+    expect(convertDistance(1609.344, 'imperial')).toBe(1);
+    expect(convertDistance(1234, 'metric')).toBe(1.23);
+  });
+
+  it('gives unit labels per system', () => {
+    expect(unitLabels('metric')).toEqual({ distance: 'km', speed: 'km/h', pace: 'min/km' });
+    expect(unitLabels('imperial')).toEqual({ distance: 'mi', speed: 'mph', pace: 'min/mi' });
+  });
+
+  it('shows stored speed and pace in the active units', () => {
+    expect(toDisplaySpeed(10, 'metric')).toBe(10);
+    expect(toDisplaySpeed(10, 'imperial')).toBe(6.2);
+    expect(toDisplayPace(6, 'metric')).toBe(6);
+    expect(toDisplayPace(6, 'imperial')).toBe(9.66);
+  });
+
+  it('stores typed values in canonical units', () => {
+    expect(fromDisplaySpeed(10, 'metric')).toBe(10);
+    expect(fromDisplaySpeed(6.2, 'imperial')).toBeCloseTo(9.978, 3);
+    expect(fromDisplayPace(6, 'metric')).toBe(6);
+    expect(fromDisplayPace(9.66, 'imperial')).toBeCloseTo(6.0024, 3);
+  });
+
+  it('keeps the canonical value when only the units change (no 10 km/h -> 10 mph bug)', () => {
+    const storedKmh = fromDisplaySpeed(10, 'metric');
+    expect(toDisplaySpeed(storedKmh, 'imperial')).toBe(6.2);
+    expect(toDisplaySpeed(storedKmh, 'metric')).toBe(10);
   });
 });

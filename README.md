@@ -21,6 +21,18 @@ npm run build
 npm run dev
 ```
 
+### Checking the code
+
+```bash
+npm run lint
+```
+
+```bash
+npm test
+```
+
+Use `npm run test:watch` to run the tests again on each change.
+
 ## Resources
 
 * See the published app, [Cardio Planner](https://xptm1219.github.io/cardio-planner/)

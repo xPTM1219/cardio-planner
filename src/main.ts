@@ -1,15 +1,24 @@
 import { GeocodingService } from './components/GeocodingService';
 import { MapComponent } from './components/MapComponent';
 import { RoutePlanner } from './components/RoutePlanner';
-import { StorageManager, DEFAULT_HOME_LOCATION, UserSettings } from './components/StorageManager';
+import { StorageManager, UserSettings } from './components/StorageManager';
+import type { Route } from './types';
 import {
   Units,
   formatSpeedBasis,
-  minPerMiToMinPerKm,
-  mphToKmh,
+  fromDisplayPace,
+  fromDisplaySpeed,
   resolveSpeed,
+  toDisplayPace,
+  toDisplaySpeed,
+  unitLabels,
 } from './utils/speeds';
+import { escapeHtml, formatDateTime } from './utils/format';
+import { getRouteLocations } from './utils/savedRoutes';
+import { MAX_WAYPOINTS, formatLatLng } from './utils/waypoints';
 import { Language, getLanguage, setLanguage, t } from './i18n';
+import { SettingsModalValues, openSettingsModal } from './ui/settingsModal';
+import { openSavedRoutesModal } from './ui/savedRoutesModal';
 
 // DOM elements
 const app = document.getElementById('app');
@@ -24,14 +33,21 @@ const routePlanner = RoutePlanner.getInstance();
 const storageManager = StorageManager.getInstance();
 const geocodingService = GeocodingService.getInstance();
 
-// Show loading overlay
+/**
+ * Name of the route that was loaded or saved last. The route popup shows it
+ * instead of the default name. A waypoint change clears it.
+ */
+let activeRouteName: string | null = null;
+
+/** Show the loading overlay. */
 function showLoading(): void {
   const loading = document.createElement('div');
   loading.className = 'loading-overlay';
-  loading.innerHTML = `<h2>${t('appLoading')}</h2>`;
+  loading.innerHTML = `<h2>${escapeHtml(t('appLoading'))}</h2>`;
   appRoot.appendChild(loading);
 }
 
+/** Hide the loading overlay. */
 function hideLoading(): void {
   const loading = document.querySelector('.loading-overlay') as HTMLElement;
   if (loading) {
@@ -39,16 +55,18 @@ function hideLoading(): void {
   }
 }
 
+/**
+ * Apply the light or dark theme to the page.
+ * @param darkMode `true` for the dark theme.
+ */
 function applyTheme(darkMode: boolean): void {
   document.body.classList.toggle('dark-mode', darkMode);
 }
 
-function escapeHtml(value: string): string {
-  const div = document.createElement('div');
-  div.textContent = value;
-  return div.innerHTML;
-}
-
+/**
+ * Show a message in the Route Information panel. Line breaks are kept.
+ * @param message Plain text.
+ */
 function setStatus(message: string): void {
   const statusEl = document.getElementById('route-status');
   if (statusEl) {
@@ -56,66 +74,56 @@ function setStatus(message: string): void {
   }
 }
 
-async function refreshSavedRoutesDropdown(): Promise<void> {
-  const select = document.getElementById('saved-routes') as HTMLSelectElement | null;
-  if (!select) {
-    return;
-  }
-
-  let routes;
-  try {
-    routes = await storageManager.loadRoutes();
-  } catch (error) {
-    console.error('Error loading saved routes:', error);
-    select.innerHTML = '<option value="">No saved routes</option>';
-    select.disabled = true;
-    return;
-  }
-
-  if (routes.length === 0) {
-    select.innerHTML = '<option value="">No saved routes</option>';
-    select.disabled = true;
-    return;
-  }
-
-  select.disabled = false;
-  const units = storageManager.getSettings().units;
-  select.innerHTML = routes
-    .map((route) => {
-      const distance = routePlanner.convertDistance(route.distance, units);
-      const unitLabel = units === 'metric' ? 'km' : 'mi';
-      const date = new Date(route.createdAt).toLocaleDateString();
-      return `<option value="${escapeHtml(route.id)}">${escapeHtml(route.name)} — ${distance} ${unitLabel} (${date})</option>`;
-    })
-    .join('');
+/** Get the active unit system from the stored settings. */
+function getCurrentUnits(): Units {
+  return storageManager.getSettings().units;
 }
 
-function getCurrentUnits(): Units {
-  const select = document.getElementById('units') as HTMLSelectElement | null;
-  return (select?.value as Units | undefined) ?? storageManager.getSettings().units;
+/** Make a unique id for a saved route. */
+function createRouteId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Fill the read-only Start and End fields from the waypoint list.
+ * @param locations Ordered `[lat, lng]` waypoints; empty clears the fields.
+ */
+function updateEndpointFields(locations: [number, number][]): void {
+  const startPointEl = document.getElementById('start-point') as HTMLInputElement | null;
+  const endPointEl = document.getElementById('end-point') as HTMLInputElement | null;
+  const first = locations[0];
+  const last = locations[locations.length - 1];
+  if (startPointEl) startPointEl.value = first ? formatLatLng(first) : '';
+  if (endPointEl) endPointEl.value = last ? formatLatLng(last) : '';
 }
 
 /**
  * Recalculate the current route with the effective speed from settings,
  * re-render it on the map, and update the status text.
+ * @returns `true` when a route was calculated.
  */
-async function recalculateRoute(): Promise<void> {
+async function recalculateRoute(): Promise<boolean> {
   try {
-    const resolved = resolveSpeed(storageManager.getSettings());
-    const units = getCurrentUnits();
+    const settings = storageManager.getSettings();
+    const resolved = resolveSpeed(settings);
     const route = await routePlanner.calculateRoute(resolved.speedMps);
 
     if (!route) {
       setStatus(t('statusNeedTwoWaypoints'));
-      return;
+      return false;
     }
 
-    mapComponent.renderRoute(route, { basisText: formatSpeedBasis(resolved, units) });
-    const info = routePlanner.getRouteInfo(units, resolved);
+    if (activeRouteName) {
+      route.name = activeRouteName;
+    }
+    mapComponent.renderRoute(route, { basisText: formatSpeedBasis(resolved, settings.units) });
+    const info = routePlanner.getRouteInfo(settings.units, resolved);
     setStatus(info || t('statusNoRouteInfo'));
+    return true;
   } catch (error) {
     console.error('Error calculating route:', error);
     setStatus(t('statusCalculateError'));
+    return false;
   }
 }
 
@@ -135,7 +143,7 @@ async function performAddressSearch(): Promise<void> {
   setStatus(t('statusSearching', { query }));
 
   try {
-    const results = await geocodingService.search(query);
+    const results = await geocodingService.search(query, getLanguage());
 
     if (results.length === 0) {
       setStatus(t('statusNoResults', { query }));
@@ -151,236 +159,337 @@ async function performAddressSearch(): Promise<void> {
   }
 }
 
-async function loadSelectedRoute(): Promise<void> {
-  const select = document.getElementById('saved-routes') as HTMLSelectElement | null;
-  const id = select?.value;
-  if (!id) {
+/**
+ * Save the current route under the name in the route-name field.
+ *
+ * [1] A waypoint change clears the calculated route, so the route is
+ *     calculated again here. A stale route is never saved.
+ * [2] Each save gets a new id and time, so two saves of the same route are
+ *     two separate entries.
+ */
+async function saveCurrentRoute(): Promise<void> {
+  if (routePlanner.getWaypoints().length < 2) {
+    setStatus(t('statusNeedTwoWaypoints'));
+    return;
+  }
+
+  // See note [1] in the docstring
+  if (!routePlanner.getCurrentRoute() && !(await recalculateRoute())) {
+    return;
+  }
+  const current = routePlanner.getCurrentRoute();
+  if (!current) {
+    return;
+  }
+
+  const routeNameInput = document.getElementById('route-name') as HTMLInputElement | null;
+  const name =
+    routeNameInput?.value.trim() || t('defaultRouteName', { date: formatDateTime(new Date(), getLanguage()) });
+
+  try {
+    // See note [2] in the docstring
+    await storageManager.saveRoute({
+      ...current,
+      id: createRouteId(),
+      name,
+      createdAt: new Date().toISOString(),
+    });
+
+    activeRouteName = name;
+    current.name = name;
+    const settings = storageManager.getSettings();
+    mapComponent.renderRoute(current, {
+      basisText: formatSpeedBasis(resolveSpeed(settings), settings.units),
+    });
+
+    if (routeNameInput) routeNameInput.value = '';
+    await refreshSavedRoutesCount();
+    setStatus(t('statusRouteSaved', { name }));
+  } catch (error) {
+    console.error('Error saving route:', error);
+    setStatus(t('statusSaveRouteError'));
+  }
+}
+
+/**
+ * Show a saved route on the map and calculate it with the current speed.
+ *
+ * [1] `updateWaypoints` calls the waypoint change handler, which clears the
+ *     route name. The name is set again after that call.
+ *
+ * @param route Stored route.
+ */
+async function loadRoute(route: Route): Promise<void> {
+  const locations = getRouteLocations(route);
+  if (!locations) {
+    setStatus(t('statusLoadRouteMissing'));
     return;
   }
 
   try {
-    const routes = await storageManager.loadRoutes();
-    const route = routes.find((r) => r.id === id);
-    if (!route || !Array.isArray(route.waypoints)) {
-      setStatus(t('statusLoadRouteMissing'));
-      return;
-    }
-
-    const locations = route.waypoints.map((wp) => wp.location);
-    const units = getCurrentUnits();
-
-    // Replace planner state and re-render map visuals. updateWaypoints fires a
-    // change notification that clears stale route layers; render afterwards.
-    routePlanner.setWaypoints(locations);
     mapComponent.updateWaypoints(locations);
-    mapComponent.renderRoute(route, {
-      basisText: formatSpeedBasis(resolveSpeed(storageManager.getSettings()), units),
-    });
+    // See note [1] in the docstring
+    activeRouteName = route.name || null;
+    const calculated = await recalculateRoute();
     mapComponent.fitBounds(locations);
 
-    const startPointEl = document.getElementById('start-point') as HTMLInputElement | null;
-    const endPointEl = document.getElementById('end-point') as HTMLInputElement | null;
-    const first = locations[0];
-    const last = locations[locations.length - 1];
-    if (startPointEl && first) {
-      startPointEl.value = `${first[0].toFixed(4)}, ${first[1].toFixed(4)}`;
-    }
-    if (endPointEl && last) {
-      endPointEl.value = `${last[0].toFixed(4)}, ${last[1].toFixed(4)}`;
-    }
+    const routeNameInput = document.getElementById('route-name') as HTMLInputElement | null;
+    if (routeNameInput) routeNameInput.value = route.name;
 
-    const info = routePlanner.getRouteInfo(units, resolveSpeed(storageManager.getSettings()));
-    setStatus(`${t('statusRouteLoaded', { name: route.name })}${info ? '\n' + info : ''}`);
+    if (calculated) {
+      const settings = storageManager.getSettings();
+      const info = routePlanner.getRouteInfo(settings.units, resolveSpeed(settings));
+      setStatus(`${t('statusRouteLoaded', { name: route.name })}${info ? '\n' + info : ''}`);
+    }
   } catch (error) {
     console.error('Error loading route:', error);
     setStatus(t('statusLoadRouteError'));
   }
 }
 
-// Create control panel HTML
+/**
+ * Delete a saved route and update the Saved Routes button.
+ * @param route Stored route.
+ * @returns `true` when the route was deleted.
+ */
+async function deleteSavedRoute(route: Route): Promise<boolean> {
+  try {
+    await storageManager.deleteRoute(route.id);
+    await refreshSavedRoutesCount();
+    setStatus(t('statusRouteDeleted'));
+    return true;
+  } catch (error) {
+    console.error('Error deleting route:', error);
+    setStatus(t('statusDeleteRouteError'));
+    return false;
+  }
+}
+
+/** Show the number of valid saved routes on the Saved Routes button. */
+async function refreshSavedRoutesCount(): Promise<void> {
+  const button = document.getElementById('saved-routes-btn');
+  if (!button) {
+    return;
+  }
+  const routes = await storageManager.loadRoutes();
+  const count = routes.filter((route) => typeof route?.id === 'string' && getRouteLocations(route)).length;
+  button.textContent = t('savedRoutesButton', { n: count });
+}
+
+/** Open the Saved Routes modal with the stored routes. */
+async function openSavedRoutes(): Promise<void> {
+  const settings = storageManager.getSettings();
+  const routes = await storageManager.loadRoutes();
+  openSavedRoutesModal({
+    routes,
+    rowOptions: {
+      units: settings.units,
+      language: getLanguage(),
+      speedMps: resolveSpeed(settings).speedMps,
+    },
+    onLoad: loadRoute,
+    onDelete: deleteSavedRoute,
+  });
+}
+
+/**
+ * Save the values from the Settings modal and apply them to the page.
+ * @param values New language, units, theme, and home location.
+ * @throws When the settings cannot be saved. The modal shows the error.
+ */
+async function saveSettingsFromModal(values: SettingsModalValues): Promise<void> {
+  const saved = await storageManager.updateSettings(values);
+  applyTheme(saved.darkMode);
+  mapComponent.updateSettings({ units: saved.units });
+  await refreshUI(saved.language);
+  if (!routePlanner.getCurrentRoute()) {
+    setStatus(t('statusSettingsSaved'));
+  }
+}
+
+/** Open the Settings modal. */
+function openSettings(): void {
+  openSettingsModal({
+    settings: storageManager.getSettings(),
+    getCurrentView: () => mapComponent.getCurrentView(),
+    onSave: saveSettingsFromModal,
+  });
+}
+
+/**
+ * Validate and store a custom speed or pace typed in the Activity panel.
+ *
+ * [1] A number field with text that is not a number has an empty value.
+ *     `badInput` finds this case, so the text is not stored as "blank".
+ * [2] An empty field clears the stored value.
+ * [3] The value is stored in canonical units (km/h, min/km).
+ *
+ * @param kind Which field changed.
+ */
+async function saveCustomValue(kind: 'speed' | 'pace'): Promise<void> {
+  const input = document.getElementById(`custom-${kind}`) as HTMLInputElement | null;
+  const errorEl = document.getElementById(`custom-${kind}-error`);
+  if (!input) {
+    return;
+  }
+
+  const showError = (visible: boolean): void => {
+    if (!errorEl) return;
+    errorEl.textContent = visible ? t(kind === 'speed' ? 'errorCustomSpeed' : 'errorCustomPace') : '';
+    errorEl.hidden = !visible;
+  };
+
+  const raw = input.value.trim();
+  let canonical: number | undefined;
+  // See note [1] in the docstring
+  if (input.validity.badInput) {
+    showError(true);
+    return;
+  }
+  // See note [2] in the docstring
+  if (raw !== '') {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+      showError(true);
+      return;
+    }
+    // See note [3] in the docstring
+    const units = getCurrentUnits();
+    canonical = kind === 'speed' ? fromDisplaySpeed(value, units) : fromDisplayPace(value, units);
+  }
+  showError(false);
+
+  try {
+    await storageManager.updateSettings(kind === 'speed' ? { customSpeed: canonical } : { customPace: canonical });
+    await recalculateIfRouteShown();
+  } catch (error) {
+    console.error('Error saving activity settings:', error);
+    setStatus(t('statusSettingsSaveError'));
+  }
+}
+
+/** Recalculate the route only when a calculated route is on the map. */
+async function recalculateIfRouteShown(): Promise<void> {
+  if (routePlanner.getCurrentRoute()) {
+    await recalculateRoute();
+  }
+}
+
+/** Build the Route Planner panel (left sidebar). */
 function controlsHTML(): string {
   return `
-  <div class="control-panel">
-    <h2>${t('routePlannerTitle')}</h2>
+  <div class="panel control-panel">
+    <h2>${escapeHtml(t('routePlannerTitle'))}</h2>
 
     <div class="form-group">
-      <label for="address-search">${t('addressSearchLabel')}</label>
-      <div style="display: flex; gap: 0.5rem;">
-        <input type="text" id="address-search" placeholder="${t('addressSearchPlaceholder')}" style="flex: 1;" />
-        <button class="btn" id="search-btn">${t('addressSearchButton')}</button>
+      <label for="address-search">${escapeHtml(t('addressSearchLabel'))}</label>
+      <div class="search-row">
+        <input type="text" id="address-search" placeholder="${escapeHtml(t('addressSearchPlaceholder'))}" autocomplete="off" />
+        <button class="btn" id="search-btn">${escapeHtml(t('addressSearchButton'))}</button>
       </div>
     </div>
 
     <div class="form-group">
-      <label for="start-point">${t('startPointLabel')}</label>
-      <input type="text" id="start-point" placeholder="${t('waypointAutoPlaceholder')}" readonly />
+      <label for="start-point">${escapeHtml(t('startPointLabel'))}</label>
+      <input type="text" id="start-point" placeholder="${escapeHtml(t('waypointAutoPlaceholder'))}" readonly />
     </div>
 
     <div class="form-group">
-      <label for="end-point">${t('endPointLabel')}</label>
-      <input type="text" id="end-point" placeholder="${t('waypointAutoPlaceholder')}" readonly />
+      <label for="end-point">${escapeHtml(t('endPointLabel'))}</label>
+      <input type="text" id="end-point" placeholder="${escapeHtml(t('waypointAutoPlaceholder'))}" readonly />
     </div>
 
-    <button class="btn" id="calculate-btn">${t('calculateRouteButton')}</button>
-    <button class="btn btn-secondary" id="clear-btn">${t('clearAllButton')}</button>
+    <button class="btn" id="calculate-btn">${escapeHtml(t('calculateRouteButton'))}</button>
+    <button class="btn btn-secondary" id="clear-btn">${escapeHtml(t('clearAllButton'))}</button>
 
-    <div class="form-group" style="margin-top: 1rem;">
-      <label for="route-name">${t('routeNameLabel')}</label>
-      <input type="text" id="route-name" placeholder="${t('routeNamePlaceholder')}" />
+    <div class="form-group form-group-spaced">
+      <label for="route-name">${escapeHtml(t('routeNameLabel'))}</label>
+      <input type="text" id="route-name" placeholder="${escapeHtml(t('routeNamePlaceholder'))}" />
     </div>
 
-    <button class="btn btn-secondary" id="save-route-btn">${t('saveRouteButton')}</button>
-
-    <div class="form-group" style="margin-top: 1rem;">
-      <label for="saved-routes">${t('savedRoutesLabel')}</label>
-      <select id="saved-routes"></select>
-    </div>
-
-    <button class="btn btn-secondary" id="load-route-btn">${t('loadRouteButton')}</button>
-    <button class="btn btn-secondary" id="delete-route-btn">${t('deleteRouteButton')}</button>
+    <button class="btn btn-secondary" id="save-route-btn">${escapeHtml(t('saveRouteButton'))}</button>
+    <button class="btn btn-secondary btn-spaced" id="saved-routes-btn">${escapeHtml(t('savedRoutesButton', { n: 0 }))}</button>
   </div>
 `;
 }
 
-// Create route info panel HTML
+/** Build the Route Information panel. */
 function routeInfoHTML(): string {
   return `
-  <div class="route-info">
-    <h3>${t('routeInformationTitle')}</h3>
-    <p id="route-status" style="color: #666;">${t('statusInitial')}</p>
+  <div class="panel route-info">
+    <h3>${escapeHtml(t('routeInformationTitle'))}</h3>
+    <p id="route-status" class="route-status">${escapeHtml(t('statusInitial'))}</p>
   </div>
 `;
 }
 
-// Create settings panel HTML
-function settingsHTML(): string {
+/**
+ * Build the Activity panel. Speed and pace show in the active units.
+ * @param settings Current settings.
+ * @returns Panel HTML.
+ */
+function activityHTML(settings: UserSettings): string {
+  const labels = unitLabels(settings.units);
+  const speedValue = settings.customSpeed !== undefined ? String(toDisplaySpeed(settings.customSpeed, settings.units)) : '';
+  const paceValue = settings.customPace !== undefined ? String(toDisplayPace(settings.customPace, settings.units)) : '';
+  const activityOption = (value: UserSettings['activityType'], label: string): string =>
+    `<option value="${value}"${settings.activityType === value ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+
   return `
-  <div class="settings-panel">
-    <h3>${t('settingsTitle')}</h3>
+  <div class="panel settings-panel">
+    <h3>${escapeHtml(t('activityPanelTitle'))}</h3>
 
     <div class="form-group">
-      <label for="units">${t('unitsLabel')}</label>
-      <select id="units">
-        <option value="metric">${t('unitsMetric')}</option>
-        <option value="imperial">${t('unitsImperial')}</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label for="language-select">${t('languageLabel')}</label>
-      <select id="language-select">
-        <option value="en">English</option>
-        <option value="es">Español</option>
-        <option value="zh-CN">简体中文</option>
-        <option value="zh-TW">繁體中文</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label for="activity-type">${t('activityTypeLabel')}</label>
+      <label for="activity-type">${escapeHtml(t('activityTypeLabel'))}</label>
       <select id="activity-type">
-        <option value="walking">${t('activityWalking')}</option>
-        <option value="jogging">${t('activityJogging')}</option>
-        <option value="running">${t('activityRunning')}</option>
-        <option value="bicycling">${t('activityBicycling')}</option>
+        ${activityOption('walking', t('activityWalking'))}
+        ${activityOption('jogging', t('activityJogging'))}
+        ${activityOption('running', t('activityRunning'))}
+        ${activityOption('bicycling', t('activityBicycling'))}
       </select>
     </div>
 
     <div class="form-group">
-      <label for="custom-speed">${t('customSpeedLabel')}</label>
-      <input type="number" id="custom-speed" placeholder="${t('customSpeedPlaceholder')}" step="0.1" min="0" />
+      <label for="custom-speed">${escapeHtml(t('customSpeedLabel', { unit: labels.speed }))}</label>
+      <input type="number" id="custom-speed" placeholder="${escapeHtml(t('customValuePlaceholder'))}" step="any" min="0" value="${speedValue}" />
+      <p class="field-error" id="custom-speed-error" role="alert" hidden></p>
     </div>
 
     <div class="form-group">
-      <label for="custom-pace">${t('customPaceLabel')}</label>
-      <input type="number" id="custom-pace" placeholder="${t('customPacePlaceholder')}" step="0.01" min="0" />
+      <label for="custom-pace">${escapeHtml(t('customPaceLabel', { unit: labels.pace }))}</label>
+      <input type="number" id="custom-pace" placeholder="${escapeHtml(t('customValuePlaceholder'))}" step="any" min="0" value="${paceValue}" />
+      <p class="field-error" id="custom-pace-error" role="alert" hidden></p>
     </div>
 
-    <div class="form-group">
-      <label for="dark-mode-toggle">${t('darkModeLabel')}</label>
-      <input type="checkbox" id="dark-mode-toggle" />
-    </div>
-
-    <div class="form-group">
-      <label for="home-lat">${t('homeLatLabel')}</label>
-      <input type="number" id="home-lat" placeholder="${DEFAULT_HOME_LOCATION.lat}" step="0.0001" />
-    </div>
-
-    <div class="form-group">
-      <label for="home-lng">${t('homeLngLabel')}</label>
-      <input type="number" id="home-lng" placeholder="${DEFAULT_HOME_LOCATION.lng}" step="0.0001" />
-    </div>
-
-    <div class="form-group">
-      <label for="home-zoom">${t('homeZoomLabel')}</label>
-      <input type="number" id="home-zoom" placeholder="${DEFAULT_HOME_LOCATION.zoom}" min="1" max="19" step="1" />
-    </div>
-
-    <button class="btn btn-secondary" id="use-current-view-btn">${t('useCurrentViewButton')}</button>
-
-    <button class="btn btn-secondary" id="save-settings-btn">${t('saveSettingsButton')}</button>
+    <button class="btn btn-secondary" id="open-settings-btn">⚙ ${escapeHtml(t('settingsButton'))}</button>
   </div>
 `;
 }
 
-// Keep the <html lang> attribute in sync with the active language
+/**
+ * Keep the `<html lang>` attribute in sync with the active language.
+ * @param language Active UI language.
+ */
 function syncHtmlLang(language: Language): void {
   document.documentElement.lang = language;
 }
 
-/** Fill the settings panel inputs from the given settings snapshot. */
-function populateSettingsValues(settings: UserSettings): void {
-  const unitsSelect = document.getElementById('units') as HTMLSelectElement | null;
-  const languageSelect = document.getElementById('language-select') as HTMLSelectElement | null;
-  const activityTypeSelect = document.getElementById('activity-type') as HTMLSelectElement | null;
-  const customSpeedInput = document.getElementById('custom-speed') as HTMLInputElement | null;
-  const customPaceInput = document.getElementById('custom-pace') as HTMLInputElement | null;
-  const darkModeToggle = document.getElementById('dark-mode-toggle') as HTMLInputElement | null;
-  const homeLatInput = document.getElementById('home-lat') as HTMLInputElement | null;
-  const homeLngInput = document.getElementById('home-lng') as HTMLInputElement | null;
-  const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement | null;
-
-  if (unitsSelect) unitsSelect.value = settings.units;
-  if (languageSelect) languageSelect.value = settings.language;
-  if (activityTypeSelect) activityTypeSelect.value = settings.activityType;
-  if (darkModeToggle) darkModeToggle.checked = settings.darkMode;
-
-  // Show custom speed/pace in the user's preferred units
-  if (customSpeedInput) {
-    customSpeedInput.value =
-      settings.customSpeed !== undefined && settings.units === 'imperial'
-        ? String(Math.round(settings.customSpeed * 0.621371192 * 10) / 10)
-        : settings.customSpeed !== undefined
-          ? String(settings.customSpeed)
-          : '';
-  }
-  if (customPaceInput) {
-    customPaceInput.value =
-      settings.customPace !== undefined && settings.units === 'imperial'
-        ? String(Math.round((settings.customPace / 0.621371192) * 100) / 100)
-        : settings.customPace !== undefined
-          ? String(settings.customPace)
-          : '';
-  }
-  if (homeLatInput) homeLatInput.value = String(settings.homeLocation.lat);
-  if (homeLngInput) homeLngInput.value = String(settings.homeLocation.lng);
-  if (homeZoomInput) homeZoomInput.value = String(settings.homeLocation.zoom);
-}
-
 /**
- * Mount translated panels, preserving transient inputs across re-renders
- * (used at boot and when the language changes).
+ * Mount the translated panels and bind their DOM events.
+ *
+ * [1] The address and route-name fields keep their text across re-renders.
+ * [2] The Start and End fields come from the planner waypoints.
  */
 function remountPanels(): void {
   const controlsContainer = document.getElementById('controls');
   const routeInfoContainer = document.getElementById('route-info');
-  const settingsContainer = document.getElementById('settings');
-  if (!controlsContainer || !routeInfoContainer || !settingsContainer) {
+  const activityContainer = document.getElementById('activity');
+  if (!controlsContainer || !routeInfoContainer || !activityContainer) {
     return;
   }
 
-  // Snapshot transient values that are not part of persisted settings
-  const transientIds = ['address-search', 'route-name', 'start-point', 'end-point'];
+  // See note [1] in the docstring
+  const transientIds = ['address-search', 'route-name'];
   const snapshots = new Map<string, string>();
   for (const id of transientIds) {
     const el = document.getElementById(id) as HTMLInputElement | null;
@@ -391,9 +500,7 @@ function remountPanels(): void {
 
   controlsContainer.innerHTML = controlsHTML();
   routeInfoContainer.innerHTML = routeInfoHTML();
-  settingsContainer.innerHTML = settingsHTML();
-
-  populateSettingsValues({ ...storageManager.getSettings(), language: getLanguage() });
+  activityContainer.innerHTML = activityHTML(storageManager.getSettings());
 
   for (const id of transientIds) {
     const el = document.getElementById(id) as HTMLInputElement | null;
@@ -403,197 +510,125 @@ function remountPanels(): void {
     }
   }
 
-  setupEventListeners();
+  // See note [2] in the docstring
+  updateEndpointFields(routePlanner.getWaypoints().map((wp) => wp.location));
+  setupPanelEventListeners();
 }
 
-/** Switch UI language immediately: re-render texts and sync <html lang>. */
-async function applyLanguage(language: Language): Promise<void> {
+/**
+ * Re-render all text after a settings change: language, units, and labels.
+ * @param language UI language to use.
+ */
+async function refreshUI(language: Language): Promise<void> {
   setLanguage(language);
   syncHtmlLang(language);
   remountPanels();
   mapComponent.refreshMarkerLabels();
-  await refreshSavedRoutesDropdown();
+  await refreshSavedRoutesCount();
 
   if (routePlanner.getCurrentRoute()) {
     await recalculateRoute();
   } else {
-    setStatus(t('statusInitial'));
+    const count = routePlanner.getWaypoints().length;
+    setStatus(count > 0 ? t('statusWaypointsCount', { n: count }) : t('statusInitial'));
   }
 }
 
-// Initialize UI
+/**
+ * Start the app: settings, panels, map, and map events.
+ *
+ * [1] The settings load before the panels render, so the panels open in the
+ *     stored language and theme.
+ * [2] A storage failure does not stop the start; the defaults stay in use.
+ * [3] The map events are bound after the map exists, one time only. This
+ *     order makes map clicks add waypoints from the start.
+ *
+ * @throws When the map container is missing.
+ */
 async function initUI(): Promise<void> {
-  // Wait for DOM to be ready
   const mapContainer = document.getElementById('map');
   if (!mapContainer) {
     throw new Error('Map container not found');
   }
 
-  // Show loading
   showLoading();
-
-  // Hide loading after a short delay
   setTimeout(hideLoading, 500);
 
-  // Load and apply persisted settings before rendering so panels open in
-  // the stored language.
+  // See note [1] in the docstring
   let savedSettings = storageManager.getSettings();
   try {
     savedSettings = await storageManager.loadSettings();
   } catch (error) {
-    // Storage failures must not abort initialization; defaults already applied.
+    // See note [2] in the docstring
     console.error('Failed to load settings; using current/defaults:', error);
   }
   setLanguage(savedSettings.language);
   syncHtmlLang(savedSettings.language);
-
-  // Mount panels into predefined sidebar containers
-  remountPanels();
-
   applyTheme(savedSettings.darkMode);
 
-  // Initialize map centered on home location
+  remountPanels();
+
+  // See note [3] in the docstring
   await mapComponent.init('map', savedSettings.homeLocation);
   mapComponent.updateSettings({ units: savedSettings.units });
+  setupMapEvents();
 
-  // Populate the saved-routes dropdown once the UI exists
-  await refreshSavedRoutesDropdown();
+  await refreshSavedRoutesCount();
 }
 
-// Setup event listeners
-function setupEventListeners(): void {
-  const calculateBtn = document.getElementById('calculate-btn') as HTMLButtonElement;
-  const clearBtn = document.getElementById('clear-btn') as HTMLButtonElement;
-  const saveRouteBtn = document.getElementById('save-route-btn') as HTMLButtonElement;
-  const unitsSelect = document.getElementById('units') as HTMLSelectElement;
-  const activityTypeSelect = document.getElementById('activity-type') as HTMLSelectElement;
-  const customSpeedInput = document.getElementById('custom-speed') as HTMLInputElement;
-  const customPaceInput = document.getElementById('custom-pace') as HTMLInputElement;
-  const darkModeToggle = document.getElementById('dark-mode-toggle') as HTMLInputElement;
-  const homeLatInput = document.getElementById('home-lat') as HTMLInputElement;
-  const homeLngInput = document.getElementById('home-lng') as HTMLInputElement;
-  const homeZoomInput = document.getElementById('home-zoom') as HTMLInputElement;
-  const useCurrentViewBtn = document.getElementById('use-current-view-btn') as HTMLButtonElement;
-  const saveSettingsBtn = document.getElementById('save-settings-btn') as HTMLButtonElement;
-  const loadRouteBtn = document.getElementById('load-route-btn') as HTMLButtonElement;
-  const deleteRouteBtn = document.getElementById('delete-route-btn') as HTMLButtonElement;
-  const searchBtn = document.getElementById('search-btn') as HTMLButtonElement;
-  const addressInput = document.getElementById('address-search') as HTMLInputElement;
-  const languageSelect = document.getElementById('language-select') as HTMLSelectElement;
-
-  // Wire live waypoint changes (drag / delete) -> sync planner, clear stale route, update status
+/**
+ * Bind map events. Call this one time, after the map is initialized.
+ * Panel re-renders must not call it again.
+ */
+function setupMapEvents(): void {
   mapComponent.setWaypointsChangeHandler((locations) => {
     routePlanner.setWaypoints(locations);
+    activeRouteName = null;
     mapComponent.clearRoute();
-    if (locations.length === 0) {
-      setStatus(t('statusCleared'));
-    } else {
-      setStatus(t('statusWaypointsCount', { n: locations.length }));
-    }
+    updateEndpointFields(locations);
+    setStatus(locations.length === 0 ? t('statusCleared') : t('statusWaypointsCount', { n: locations.length }));
   });
 
-  // Map click handler for adding waypoints
-  const map = mapComponent.getMap();
-  if (map) {
-    map.on('click', async (e: L.LeafletMouseEvent) => {
-      const latlng = e.latlng;
-      
-      // Update waypoint inputs
-      const startPointEl = document.getElementById('start-point') as HTMLInputElement;
-      const endPointEl = document.getElementById('end-point') as HTMLInputElement;
-      
-      startPointEl.value = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
-      endPointEl.value = `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
-      
-      // Add waypoint to planner
-      routePlanner.addWaypoint([latlng.lat, latlng.lng]);
+  mapComponent.setWaypointLimitHandler(() => {
+    setStatus(t('statusMaxWaypoints', { max: MAX_WAYPOINTS }));
+  });
+}
 
-      // Add draggable/deletable marker to map (addWaypointMarker handles colors + line + notifications)
-      mapComponent.addWaypointMarker([latlng.lat, latlng.lng]);
+/**
+ * Bind the events of the panel elements. {@link remountPanels} calls this
+ * after each re-render, because the elements are new.
+ */
+function setupPanelEventListeners(): void {
+  const calculateBtn = document.getElementById('calculate-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const saveRouteBtn = document.getElementById('save-route-btn');
+  const savedRoutesBtn = document.getElementById('saved-routes-btn');
+  const searchBtn = document.getElementById('search-btn');
+  const addressInput = document.getElementById('address-search');
+  const activityTypeSelect = document.getElementById('activity-type') as HTMLSelectElement | null;
+  const customSpeedInput = document.getElementById('custom-speed');
+  const customPaceInput = document.getElementById('custom-pace');
+  const openSettingsBtn = document.getElementById('open-settings-btn');
 
-      // Update status (planner and map stay in sync via change handler too)
-      const waypoints = routePlanner.getWaypoints();
-      setStatus(t('statusAddedWaypoints', { n: waypoints.length }));
-    });
-  }
-  
-  // Calculate route button
   calculateBtn?.addEventListener('click', () => {
     void recalculateRoute();
   });
-  
-  // Clear button
+
   clearBtn?.addEventListener('click', () => {
     routePlanner.clear();
+    activeRouteName = null;
     mapComponent.clearRoute();
     mapComponent.clearWaypointMarkers();
-
+    updateEndpointFields([]);
     setStatus(t('statusCleared'));
-
-    // Clear inputs
-    const startPointEl = document.getElementById('start-point') as HTMLInputElement;
-    const endPointEl = document.getElementById('end-point') as HTMLInputElement;
-    
-    startPointEl.value = '';
-    endPointEl.value = '';
-  });
-  
-  // Save route button
-  saveRouteBtn?.addEventListener('click', async () => {
-    const routeNameInput = document.getElementById('route-name') as HTMLInputElement;
-    const routeName = routeNameInput.value || `Route ${Date.now()}`;
-    
-    try {
-      const currentRoute = routePlanner.getCurrentRoute();
-      
-      if (currentRoute) {
-        // Update route name
-        currentRoute.name = routeName;
-        
-        // Save to storage
-        await storageManager.saveRoute(currentRoute);
-        
-        // Clear input
-        routeNameInput.value = '';
-
-        setStatus(t('statusRouteSaved', { name: routeName }));
-
-        // Keep the dropdown in sync after every save
-        await refreshSavedRoutesDropdown();
-      }
-    } catch (error) {
-      console.error('Error saving route:', error);
-      setStatus(t('statusSaveRouteError'));
-    }
-  });
-  
-  // Load saved route
-  loadRouteBtn?.addEventListener('click', () => {
-    void loadSelectedRoute();
   });
 
-  // Delete selected saved route
-  deleteRouteBtn?.addEventListener('click', async () => {
-    const select = document.getElementById('saved-routes') as HTMLSelectElement | null;
-    const id = select?.value;
-    if (!id) {
-      return;
-    }
-
-    try {
-      await storageManager.deleteRoute(id);
-      await refreshSavedRoutesDropdown();
-      setStatus(t('statusRouteDeleted'));
-    } catch (error) {
-      console.error('Error deleting route:', error);
-      setStatus(t('statusDeleteRouteError'));
-    }
+  saveRouteBtn?.addEventListener('click', () => {
+    void saveCurrentRoute();
   });
 
-  // Language select: re-render texts immediately; persisted via Save Settings
-  languageSelect?.addEventListener('change', (e: Event) => {
-    const language = (e.target as HTMLSelectElement).value as Language;
-    void applyLanguage(language);
+  savedRoutesBtn?.addEventListener('click', () => {
+    void openSavedRoutes();
   });
 
   // Address search: button click or Enter key. Fired only on explicit
@@ -608,137 +643,27 @@ function setupEventListeners(): void {
     }
   });
 
-  // Units select change
-  unitsSelect?.addEventListener('change', (e: Event) => {
-    const units = (e.target as HTMLSelectElement).value as 'metric' | 'imperial';
-    mapComponent.updateSettings({ units });
-
-    // Re-derive status (and popup units) for the current route
-    if (routePlanner.getCurrentRoute()) {
-      void recalculateRoute();
+  activityTypeSelect?.addEventListener('change', async () => {
+    try {
+      await storageManager.updateSettings({
+        activityType: activityTypeSelect.value as UserSettings['activityType'],
+      });
+      await recalculateIfRouteShown();
+    } catch (error) {
+      console.error('Error saving activity type:', error);
+      setStatus(t('statusSettingsSaveError'));
     }
-
-    // Distance labels in the saved-routes dropdown follow the active units
-    void refreshSavedRoutesDropdown();
-  });
-  
-  // Activity type select change (persisted, then duration re-derived on save)
-  activityTypeSelect?.addEventListener('change', () => {
-    saveSettingsBtn?.click();
   });
 
-  // Custom speed / pace changes are persisted via the Save Settings flow
   customSpeedInput?.addEventListener('change', () => {
-    saveSettingsBtn?.click();
+    void saveCustomValue('speed');
   });
   customPaceInput?.addEventListener('change', () => {
-    saveSettingsBtn?.click();
+    void saveCustomValue('pace');
   });
 
-  // Dark mode toggle
-  darkModeToggle?.addEventListener('change', (e: Event) => {
-    const darkMode = (e.target as HTMLInputElement).checked;
-    applyTheme(darkMode);
-    saveSettingsBtn?.click();
-  });
-  
-  // Save settings button
-  useCurrentViewBtn?.addEventListener('click', () => {
-    const map = mapComponent.getMap();
-    if (!map) {
-      return;
-    }
-
-    const center = map.getCenter();
-    homeLatInput.value = center.lat.toFixed(6);
-    homeLngInput.value = center.lng.toFixed(6);
-    homeZoomInput.value = String(map.getZoom());
-
-    setStatus(t('statusCapturedView'));
-  });
-
-  // Save settings button
-  saveSettingsBtn?.addEventListener('click', async () => {
-    try {
-      const units = unitsSelect?.value as 'metric' | 'imperial';
-      const language = (languageSelect?.value ?? getLanguage()) as Language;
-      const activityType = (activityTypeSelect?.value ?? 'walking') as UserSettings['activityType'];
-      const darkMode = Boolean(darkModeToggle?.checked);
-      const lat = Number(homeLatInput?.value);
-      const lng = Number(homeLngInput?.value);
-      const zoom = Number(homeZoomInput?.value);
-
-      if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
-        throw new Error(t('errorLatitudeRange'));
-      }
-      if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
-        throw new Error(t('errorLongitudeRange'));
-      }
-      if (!Number.isFinite(zoom) || zoom < 1 || zoom > 19) {
-        throw new Error(t('errorZoomRange'));
-      }
-
-      // Custom speed/pace inputs are entered in the active unit system;
-      // store canonical values (km/h, min/km).
-      const speedRaw = customSpeedInput?.value.trim() ?? '';
-      const paceRaw = customPaceInput?.value.trim() ?? '';
-
-      let customSpeedCanonical: number | undefined;
-      if (speedRaw !== '') {
-        const value = Number(speedRaw);
-        if (!Number.isFinite(value) || value <= 0) {
-          throw new Error(t('errorCustomSpeed'));
-        }
-        customSpeedCanonical = units === 'imperial' ? mphToKmh(value) : value;
-      }
-
-      let customPaceCanonical: number | undefined;
-      if (paceRaw !== '') {
-        const value = Number(paceRaw);
-        if (!Number.isFinite(value) || value <= 0) {
-          throw new Error(t('errorCustomPace'));
-        }
-        customPaceCanonical = units === 'imperial' ? minPerMiToMinPerKm(value) : value;
-      }
-
-      // Get current settings
-      const currentSettings = storageManager.getSettings();
-
-      // Update settings
-      const newSettings: UserSettings = {
-        name: currentSettings.name,
-        units,
-        language,
-        activityType,
-        customSpeed: customSpeedCanonical,
-        customPace: customPaceCanonical,
-        darkMode,
-        homeLocation: {
-          lat,
-          lng,
-          zoom,
-        },
-      };
-
-      await storageManager.saveSettings(newSettings);
-
-      // Update map component settings
-      mapComponent.updateSettings({ units });
-      syncHtmlLang(language);
-      applyTheme(darkMode);
-
-      // Re-derive the current route's duration with the new speed settings
-      if (routePlanner.getCurrentRoute()) {
-        await recalculateRoute();
-      } else {
-        setStatus(t('statusSettingsSaved'));
-      }
-    } catch (error) {
-      console.error('Error saving settings:', error);
-
-      const message = error instanceof Error ? error.message : t('statusSettingsSaveError');
-      setStatus(message);
-    }
+  openSettingsBtn?.addEventListener('click', () => {
+    openSettings();
   });
 }
 

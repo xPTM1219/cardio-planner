@@ -1,5 +1,5 @@
 import { ActivityType, HomeLocation, UserSettings, Route } from '../types';
-import { detectBrowserLanguage, Language } from '../i18n';
+import { detectBrowserLanguage, Language, TranslationKey } from '../i18n';
 
 const STORAGE_KEY_SETTINGS = 'walk_planner_settings';
 const STORAGE_KEY_ROUTES = 'walk_planner_routes';
@@ -11,15 +11,42 @@ export const DEFAULT_HOME_LOCATION: HomeLocation = {
   zoom: 3,
 };
 
+/**
+ * Build a new default settings object.
+ * @returns Default settings with a copy of {@link DEFAULT_HOME_LOCATION}.
+ */
 export function getDefaultSettings(): UserSettings {
   return {
     name: '',
     units: 'metric',
     language: 'en',
     activityType: 'walking',
-    homeLocation: DEFAULT_HOME_LOCATION,
+    homeLocation: { ...DEFAULT_HOME_LOCATION },
     darkMode: false,
   };
+}
+
+/**
+ * Validate a home location typed by the user.
+ *
+ * The rules are the same as the rules that {@link StorageManager.loadSettings}
+ * uses. A value that passes here is not reset to the default after a reload.
+ *
+ * @param home Latitude, longitude, and zoom to check.
+ * @returns `null` when all values are valid, else the translation key of the
+ *   first error.
+ */
+export function validateHomeLocation(home: HomeLocation): TranslationKey | null {
+  if (!isFiniteNumber(home.lat) || home.lat < -90 || home.lat > 90) {
+    return 'errorLatitudeRange';
+  }
+  if (!isFiniteNumber(home.lng) || home.lng < -180 || home.lng > 180) {
+    return 'errorLongitudeRange';
+  }
+  if (!isFiniteNumber(home.zoom) || !Number.isInteger(home.zoom) || home.zoom < 1 || home.zoom > 19) {
+    return 'errorZoomRange';
+  }
+  return null;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -67,12 +94,16 @@ function normalizeSettings(parsed: Partial<UserSettings> | null): UserSettings {
   };
 }
 
+/**
+ * Reads and writes user settings and saved routes in `localStorage`.
+ */
 export class StorageManager {
   private static instance: StorageManager;
   private settings: UserSettings | null = null;
 
   private constructor() {}
 
+  /** Returns the shared singleton instance. */
   public static getInstance(): StorageManager {
     if (!StorageManager.instance) {
       StorageManager.instance = new StorageManager();
@@ -84,6 +115,7 @@ export class StorageManager {
    * Load user settings from localStorage.
    * Corrupt or partial data never throws: each field is validated and
    * falls back to its default independently.
+   * @returns The normalized settings, which are also cached and saved again.
    */
   async loadSettings(): Promise<UserSettings> {
     let stored: string | null = null;
@@ -116,7 +148,9 @@ export class StorageManager {
   }
 
   /**
-   * Save user settings to localStorage
+   * Save user settings to localStorage.
+   * @param settings Complete settings to store.
+   * @throws When localStorage cannot be written.
    */
   async saveSettings(settings: UserSettings): Promise<void> {
     try {
@@ -129,7 +163,29 @@ export class StorageManager {
   }
 
   /**
-   * Get current settings with fallback to defaults
+   * Merge a partial change into the current settings, normalize the result,
+   * and save it.
+   *
+   * [1] A key that is present with the value `undefined` clears that value
+   *     (for example `customSpeed`).
+   * [2] Invalid values fall back to defaults, as in {@link loadSettings}.
+   *
+   * @param changes Fields to change. Other fields keep their current values.
+   * @returns The new settings.
+   * @throws When localStorage cannot be written.
+   */
+  async updateSettings(changes: Partial<UserSettings>): Promise<UserSettings> {
+    // See note [1] in the docstring
+    const merged: UserSettings = { ...this.getSettings(), ...changes };
+    // See note [2] in the docstring
+    const normalized = normalizeSettings(merged);
+    await this.saveSettings(normalized);
+    return normalized;
+  }
+
+  /**
+   * Get current settings with fallback to defaults.
+   * @returns The cached settings, or new defaults before {@link loadSettings}.
    */
   getSettings(): UserSettings {
     return this.settings ?? getDefaultSettings();
@@ -138,6 +194,8 @@ export class StorageManager {
   /**
    * Load saved routes from localStorage.
    * Corrupt data is treated as an empty list instead of throwing.
+   * @returns The stored routes. Single entries are not validated here; see
+   *   `toSavedRouteRows` and `getRouteLocations`.
    */
   async loadRoutes(): Promise<Route[]> {
     let stored: string | null = null;
@@ -166,7 +224,9 @@ export class StorageManager {
   }
 
   /**
-   * Save a route to localStorage
+   * Add a route to the saved routes in localStorage.
+   * @param route Route to store.
+   * @throws When localStorage cannot be written.
    */
   async saveRoute(route: Route): Promise<void> {
     try {
@@ -180,7 +240,9 @@ export class StorageManager {
   }
 
   /**
-   * Delete a route from localStorage
+   * Delete a route from localStorage.
+   * @param routeId Id of the route to delete. Other routes do not change.
+   * @throws When localStorage cannot be written.
    */
   async deleteRoute(routeId: string): Promise<void> {
     try {
@@ -194,7 +256,8 @@ export class StorageManager {
   }
 
   /**
-   * Clear all saved routes
+   * Clear all saved routes.
+   * @throws When localStorage cannot be written.
    */
   async clearRoutes(): Promise<void> {
     try {
@@ -206,7 +269,8 @@ export class StorageManager {
   }
 
   /**
-   * Check if storage is available
+   * Check if storage is available.
+   * @returns `true` when localStorage can be written and read.
    */
   async checkStorage(): Promise<boolean> {
     try {

@@ -88,4 +88,14 @@ describe('GeocodingService', () => {
     expect(await service.search('bad entry')).toEqual([]);
     expect(await service.search('   ')).toEqual([]);
   });
+  it('sends accept-language only when a language is given', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response('[]', { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await service.search('Madrid', 'zh-CN');
+    await service.search('Madrid');
+
+    expect(fetchMock.mock.calls[0]?.[0] as string).toContain('accept-language=zh-CN');
+    expect(fetchMock.mock.calls[1]?.[0] as string).not.toContain('accept-language');
+  });
 });

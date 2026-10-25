@@ -3,10 +3,21 @@ import { es } from './es';
 import { zhCN } from './zh-CN';
 import { zhTW } from './zh-TW';
 
+/** Supported UI languages. */
 export type Language = 'en' | 'es' | 'zh-CN' | 'zh-TW';
 
+/** All supported UI languages, in menu order. */
 export const LANGUAGES: Language[] = ['en', 'es', 'zh-CN', 'zh-TW'];
 
+/** Names of the languages in their own language, for the language menu. */
+export const LANGUAGE_NAMES: Record<Language, string> = {
+  en: 'English',
+  es: 'Español',
+  'zh-CN': '简体中文',
+  'zh-TW': '繁體中文',
+};
+
+/** A key of the English source dictionary. */
 export type TranslationKey = keyof typeof en;
 
 type Dictionary = Record<TranslationKey, string>;
@@ -39,10 +50,18 @@ export function t(key: TranslationKey, params?: Record<string, string | number>)
   return params ? interpolate(text, params) : text;
 }
 
+/**
+ * Get the active UI language.
+ * @returns The language that {@link t} uses now.
+ */
 export function getLanguage(): Language {
   return currentLanguage;
 }
 
+/**
+ * Set the active UI language. Unknown values are ignored.
+ * @param language Language for later {@link t} calls.
+ */
 export function setLanguage(language: Language): void {
   if (LANGUAGES.includes(language)) {
     currentLanguage = language;
