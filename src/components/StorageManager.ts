@@ -1,20 +1,109 @@
-import { HomeLocation, UserSettings, Route } from '../types';
+import { ActivityType, HomeLocation, UserSettings, Route } from '../types';
+import { detectBrowserLanguage, Language, TranslationKey } from '../i18n';
 
 const STORAGE_KEY_SETTINGS = 'walk_planner_settings';
 const STORAGE_KEY_ROUTES = 'walk_planner_routes';
-const DEFAULT_HOME_LOCATION: HomeLocation = {
-  // Ceiba, Puerto Rico
-  lat: 18.2644,
-  lng: -65.648,
-  zoom: 13,
+
+/** Default home view: North America zoomed out. Single source of truth. */
+export const DEFAULT_HOME_LOCATION: HomeLocation = {
+  lat: 45,
+  lng: -100,
+  zoom: 3,
 };
 
+/**
+ * Build a new default settings object.
+ * @returns Default settings with a copy of {@link DEFAULT_HOME_LOCATION}.
+ */
+export function getDefaultSettings(): UserSettings {
+  return {
+    name: '',
+    units: 'metric',
+    language: 'en',
+    activityType: 'walking',
+    homeLocation: { ...DEFAULT_HOME_LOCATION },
+    darkMode: false,
+  };
+}
+
+/**
+ * Validate a home location typed by the user.
+ *
+ * The rules are the same as the rules that {@link StorageManager.loadSettings}
+ * uses. A value that passes here is not reset to the default after a reload.
+ *
+ * @param home Latitude, longitude, and zoom to check.
+ * @returns `null` when all values are valid, else the translation key of the
+ *   first error.
+ */
+export function validateHomeLocation(home: HomeLocation): TranslationKey | null {
+  if (!isFiniteNumber(home.lat) || home.lat < -90 || home.lat > 90) {
+    return 'errorLatitudeRange';
+  }
+  if (!isFiniteNumber(home.lng) || home.lng < -180 || home.lng > 180) {
+    return 'errorLongitudeRange';
+  }
+  if (!isFiniteNumber(home.zoom) || !Number.isInteger(home.zoom) || home.zoom < 1 || home.zoom > 19) {
+    return 'errorZoomRange';
+  }
+  return null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isActivityType(value: unknown): value is ActivityType {
+  return value === 'walking' || value === 'jogging' || value === 'running' || value === 'bicycling';
+}
+
+function isLanguage(value: unknown): value is Language {
+  return value === 'en' || value === 'es' || value === 'zh-CN' || value === 'zh-TW';
+}
+
+function normalizeOptionalPositiveNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) && value > 0 ? value : undefined;
+}
+
+function normalizeHomeLocation(value: unknown): HomeLocation {
+  const raw = (typeof value === 'object' && value !== null ? value : {}) as Partial<HomeLocation>;
+  return {
+    lat: isFiniteNumber(raw.lat) && raw.lat >= -90 && raw.lat <= 90 ? raw.lat : DEFAULT_HOME_LOCATION.lat,
+    lng: isFiniteNumber(raw.lng) && raw.lng >= -180 && raw.lng <= 180 ? raw.lng : DEFAULT_HOME_LOCATION.lng,
+    zoom: isFiniteNumber(raw.zoom) && Number.isInteger(raw.zoom) && raw.zoom >= 1 && raw.zoom <= 19 ? raw.zoom : DEFAULT_HOME_LOCATION.zoom,
+  };
+}
+
+function normalizeSettings(parsed: Partial<UserSettings> | null): UserSettings {
+  if (!parsed || typeof parsed !== 'object') {
+    // First visit: seed the language from the browser locale.
+    return { ...getDefaultSettings(), language: detectBrowserLanguage() };
+  }
+  const defaults = getDefaultSettings();
+  return {
+    name: typeof parsed.name === 'string' ? parsed.name : defaults.name,
+    units: parsed.units === 'imperial' || parsed.units === 'metric' ? parsed.units : defaults.units,
+    // Unknown/missing languages fall back to the browser locale (then English).
+    language: isLanguage(parsed.language) ? parsed.language : detectBrowserLanguage(),
+    // Legacy `fitnessLevel` values are silently dropped by this normalization.
+    activityType: isActivityType(parsed.activityType) ? parsed.activityType : defaults.activityType,
+    customSpeed: normalizeOptionalPositiveNumber(parsed.customSpeed),
+    customPace: normalizeOptionalPositiveNumber(parsed.customPace),
+    homeLocation: normalizeHomeLocation(parsed.homeLocation),
+    darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : defaults.darkMode,
+  };
+}
+
+/**
+ * Reads and writes user settings and saved routes in `localStorage`.
+ */
 export class StorageManager {
   private static instance: StorageManager;
   private settings: UserSettings | null = null;
 
   private constructor() {}
 
+  /** Returns the shared singleton instance. */
   public static getInstance(): StorageManager {
     if (!StorageManager.instance) {
       StorageManager.instance = new StorageManager();
@@ -23,44 +112,45 @@ export class StorageManager {
   }
 
   /**
-   * Load user settings from localStorage
+   * Load user settings from localStorage.
+   * Corrupt or partial data never throws: each field is validated and
+   * falls back to its default independently.
+   * @returns The normalized settings, which are also cached and saved again.
    */
   async loadSettings(): Promise<UserSettings> {
+    let stored: string | null = null;
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      const defaultSettings: UserSettings = {
-        name: '',
-        units: 'metric',
-        fitnessLevel: 'moderate',
-        homeLocation: DEFAULT_HOME_LOCATION,
-        darkMode: false,
-      };
-
-      if (stored) {
-        const parsed = JSON.parse(stored) as Partial<UserSettings>;
-        this.settings = {
-          ...defaultSettings,
-          ...parsed,
-          homeLocation: parsed.homeLocation ?? defaultSettings.homeLocation,
-          darkMode: typeof parsed.darkMode === 'boolean' ? parsed.darkMode : defaultSettings.darkMode,
-        };
-
-        // Persist normalized settings to support migration from older schema
-        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(this.settings));
-        return this.getSettings();
-      }
-
-      this.settings = defaultSettings;
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(defaultSettings));
-      return defaultSettings;
+      stored = localStorage.getItem(STORAGE_KEY_SETTINGS);
     } catch (error) {
-      console.error('Error loading settings:', error);
-      throw new Error('Failed to load settings from storage');
+      console.warn('Could not read settings from storage:', error);
     }
+
+    let parsed: Partial<UserSettings> | null = null;
+    if (stored) {
+      try {
+        parsed = JSON.parse(stored) as Partial<UserSettings>;
+      } catch (error) {
+        console.warn('Stored settings are corrupt; using defaults:', error);
+        parsed = null;
+      }
+    }
+
+    this.settings = normalizeSettings(parsed);
+
+    // Persist normalized settings to support migration from older schemas.
+    try {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(this.settings));
+    } catch (error) {
+      console.warn('Could not persist normalized settings:', error);
+    }
+
+    return this.settings;
   }
 
   /**
-   * Save user settings to localStorage
+   * Save user settings to localStorage.
+   * @param settings Complete settings to store.
+   * @throws When localStorage cannot be written.
    */
   async saveSettings(settings: UserSettings): Promise<void> {
     try {
@@ -73,36 +163,70 @@ export class StorageManager {
   }
 
   /**
-   * Get current settings with fallback to defaults
+   * Merge a partial change into the current settings, normalize the result,
+   * and save it.
+   *
+   * [1] A key that is present with the value `undefined` clears that value
+   *     (for example `customSpeed`).
+   * [2] Invalid values fall back to defaults, as in {@link loadSettings}.
+   *
+   * @param changes Fields to change. Other fields keep their current values.
+   * @returns The new settings.
+   * @throws When localStorage cannot be written.
    */
-  getSettings(): UserSettings {
-    return this.settings ?? {
-      name: '',
-      units: 'metric',
-      fitnessLevel: 'moderate',
-      homeLocation: DEFAULT_HOME_LOCATION,
-      darkMode: false,
-    };
+  async updateSettings(changes: Partial<UserSettings>): Promise<UserSettings> {
+    // See note [1] in the docstring
+    const merged: UserSettings = { ...this.getSettings(), ...changes };
+    // See note [2] in the docstring
+    const normalized = normalizeSettings(merged);
+    await this.saveSettings(normalized);
+    return normalized;
   }
 
   /**
-   * Load saved routes from localStorage
+   * Get current settings with fallback to defaults.
+   * @returns The cached settings, or new defaults before {@link loadSettings}.
+   */
+  getSettings(): UserSettings {
+    return this.settings ?? getDefaultSettings();
+  }
+
+  /**
+   * Load saved routes from localStorage.
+   * Corrupt data is treated as an empty list instead of throwing.
+   * @returns The stored routes. Single entries are not validated here; see
+   *   `toSavedRouteRows` and `getRouteLocations`.
    */
   async loadRoutes(): Promise<Route[]> {
+    let stored: string | null = null;
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_ROUTES);
-      if (stored) {
-        return JSON.parse(stored);
-      }
-      return [];
+      stored = localStorage.getItem(STORAGE_KEY_ROUTES);
     } catch (error) {
-      console.error('Error loading routes:', error);
-      throw new Error('Failed to load routes from storage');
+      console.warn('Could not read routes from storage:', error);
+      return [];
+    }
+
+    if (!stored) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(stored) as unknown;
+      if (!Array.isArray(parsed)) {
+        console.warn('Stored routes are corrupt (not an array); treating as empty.');
+        return [];
+      }
+      return parsed as Route[];
+    } catch (error) {
+      console.warn('Stored routes are corrupt; treating as empty:', error);
+      return [];
     }
   }
 
   /**
-   * Save a route to localStorage
+   * Add a route to the saved routes in localStorage.
+   * @param route Route to store.
+   * @throws When localStorage cannot be written.
    */
   async saveRoute(route: Route): Promise<void> {
     try {
@@ -116,7 +240,9 @@ export class StorageManager {
   }
 
   /**
-   * Delete a route from localStorage
+   * Delete a route from localStorage.
+   * @param routeId Id of the route to delete. Other routes do not change.
+   * @throws When localStorage cannot be written.
    */
   async deleteRoute(routeId: string): Promise<void> {
     try {
@@ -130,7 +256,8 @@ export class StorageManager {
   }
 
   /**
-   * Clear all saved routes
+   * Clear all saved routes.
+   * @throws When localStorage cannot be written.
    */
   async clearRoutes(): Promise<void> {
     try {
@@ -142,7 +269,8 @@ export class StorageManager {
   }
 
   /**
-   * Check if storage is available
+   * Check if storage is available.
+   * @returns `true` when localStorage can be written and read.
    */
   async checkStorage(): Promise<boolean> {
     try {

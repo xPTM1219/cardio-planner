@@ -1,137 +1,119 @@
-# Cardio Planner App - Architecture Plan
+# Cardio Planner App - Architecture
 
 ## Project Overview
-A TypeScript-based web application for planning walking/running routes using OpenStreetMap with local browser storage (no cloud account required).
+A TypeScript web app for planning walking, jogging, running, and cycling routes on an OpenStreetMap map. All data stays in the browser (localStorage); no account or server is needed.
 
 ## Technology Stack
-- **Frontend**: TypeScript, HTML5, CSS3
-- **Mapping Library**: Leaflet.js (OpenStreetMap compatible)
-- **Storage**: localStorage API
-- **Routing**: OSRM (Open Source Routing Machine) via public API or Mapbox Directions API
-- **Build Tool**: Vite (for fast development and bundling)
+- **Frontend**: TypeScript, HTML5, CSS3 (no UI framework)
+- **Mapping**: Leaflet.js with OpenStreetMap tiles
+- **Tables**: Tabulator (saved-routes table, modular import)
+- **Address search**: Nominatim (OpenStreetMap geocoding, no API key)
+- **Storage**: localStorage
+- **Routing**: local straight-line (Haversine) distances between waypoints
+- **Build/test**: Vite, Vitest + jsdom, ESLint (typescript-eslint)
 
 ## Project Structure
 
 ```
 cardio-planner/
-├── index.html              # Main HTML entry point
-├── package.json            # Node.js dependencies
-├── tsconfig.json           # TypeScript configuration
-├── vite.config.ts          # Vite build configuration
+├── index.html                 # Page shell: header, sidebars, map, #modals
 ├── src/
-│   ├── main.ts             # Application entry point
-│   ├── styles/
-│   │   └── global.css      # Global styles
+│   ├── main.ts                # Wiring: panels, events, settings, routes
 │   ├── components/
-│   │   ├── MapComponent.ts # Main map component
-│   │   ├── RoutePlanner.ts # Route planning logic
-│   │   ├── StorageManager.ts # localStorage wrapper
-│   │   ├── UserProfile.ts  # User profile management
-│   │   └── UIComponents.ts # Reusable UI components
-│   └── types/
-│       └── index.ts        # TypeScript type definitions
-├── public/
-│   └── favicon.ico         # Browser favicon
-└── plans/
-    └── architecture.md     # This file
+│   │   ├── MapComponent.ts    # Leaflet map, click-to-add, markers, route line
+│   │   ├── RoutePlanner.ts    # Waypoints, distance/duration, route info text
+│   │   ├── StorageManager.ts  # Settings + routes in localStorage, validation
+│   │   └── GeocodingService.ts# Nominatim address search
+│   ├── ui/
+│   │   ├── modal.ts           # Native <dialog> modal helper
+│   │   ├── settingsModal.ts   # Language, units, theme, home location
+│   │   └── savedRoutesModal.ts# Tabulator table: load / delete routes
+│   ├── utils/
+│   │   ├── speeds.ts          # Activity speeds, unit conversions, speed basis text
+│   │   ├── format.ts          # escapeHtml, formatDuration, date formatting
+│   │   ├── waypoints.ts       # Waypoint limit, map-click decision, coordinates
+│   │   └── savedRoutes.ts     # Stored routes -> table rows, route validation
+│   ├── i18n/                  # en, es, zh-CN, zh-TW dictionaries + t()
+│   ├── types/index.ts         # Shared types (UserSettings, Route, ...)
+│   └── styles/global.css      # Theme tokens (light/dark), layout, modals
+└── docs/
 ```
 
-## Component Architecture
+Unit tests (`*.test.ts`) sit next to the code they test.
 
-### 1. MapComponent
-- Initializes Leaflet map with OpenStreetMap tiles
-- Handles user interactions (click, drag, zoom)
-- Renders route polyline on the map
-- Displays distance and time information
+## Components
 
-### 2. RoutePlanner
-- Manages route calculation logic
-- Fetches routing data from OSRM/Mapbox API
-- Calculates distance, elevation, and estimated time
-- Handles multiple waypoints for complex routes
+### MapComponent
+- Creates the Leaflet map at the stored home location.
+- Owns click-to-add: one map click handler, attached once in `init()`.
+- Ignores the map click that can follow a marker drag, and stops at the waypoint limit.
+- Draggable markers (green start, blue middle, red end) with a delete link in the popup.
+- Reports every waypoint change through one change handler (the single source of truth).
+- Draws the calculated route (GeoJSON `[lon, lat]` converted to Leaflet `[lat, lng]`).
 
-### 3. StorageManager
-- Wraps localStorage API
-- Provides type-safe storage methods
-- Handles data serialization/deserialization
-- Implements data versioning for migrations
+### RoutePlanner
+- Keeps the waypoint list and the current calculated route.
+- Any waypoint change clears the current route, so a stale route is never saved.
+- Distance = sum of Haversine segments; duration = distance / effective speed.
 
-### 4. UserProfile
-- Manages user settings (name, fitness level, preferred units)
-- Stores saved routes and favorites
-- Handles profile creation/editing
+### StorageManager
+- Loads settings with per-field validation and migration (corrupt data falls back to defaults).
+- `updateSettings()` merges, normalizes, and saves partial changes.
+- Saves, loads, and deletes routes; corrupt route lists load as empty.
+
+### GeocodingService
+- Nominatim search on explicit user action only (button or Enter), with `accept-language` set to the UI language.
+
+### UI modals
+- **Settings modal**: language, units, theme (light/dark), home location. Changes apply on Save; Cancel/Esc discard.
+- **Saved Routes modal**: sortable Tabulator table (name, distance, estimated time at the current speed, points, date) with Load and Delete (with confirmation).
 
 ## Data Flow
 
 ```mermaid
 graph TD
-    A[User Input: Start/End Points] --> B{RoutePlanner}
-    B -->|Calculate Route| C[OSRM API]
-    C -->|Return Route Data| B
-    B -->|Render Route| D[MapComponent]
-    D -->|Display on Map| E[User View]
-    F[User Settings] --> G[StorageManager]
-    G -->|Save to localStorage| H[Browser Storage]
-    I[Load from Storage] --> G
-    G -->|Provide Settings| F
+    A[Map click / drag / delete] --> B[MapComponent]
+    B -->|waypoint change handler| C[main.ts]
+    C -->|setWaypoints| D[RoutePlanner]
+    E[Calculate / Save / Load] --> D
+    D -->|Route| B
+    F[Activity panel] -->|updateSettings| G[StorageManager]
+    H[Settings modal] -->|updateSettings| G
+    G --> I[(localStorage)]
+    J[Saved Routes modal] -->|load / delete| G
+    K[Address search] --> L[GeocodingService] -->|flyTo| B
 ```
 
-## Key Features (Prototype)
-
-1. **Map Display**: Full-screen OpenStreetMap with Leaflet.js
-2. **Route Drawing**: Click map to add waypoints, drag to adjust
-3. **Distance Calculation**: Real-time distance and time estimates
-4. **Local Storage**: Save/load routes and settings
-5. **User Preferences**: Units (metric/imperial), fitness level
-
-## API Endpoints
-
-- **OSRM Routing API**: `http://router.project-osrm.org/route/v2/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson`
-- **Mapbox Directions API** (alternative): `https://api.mapbox.com/directions/v5/mapbox/walking/{start};{end}?access_token={TOKEN}`
-
 ## Storage Schema
+
+Settings key: `walk_planner_settings`
 
 ```typescript
 interface UserSettings {
   name: string;
   units: 'metric' | 'imperial';
-  fitnessLevel: 'casual' | 'moderate' | 'active';
-  savedRoutes: SavedRoute[];
-}
-
-interface SavedRoute {
-  id: string;
-  name: string;
-  waypoints: Waypoint[];
-  distance: number;
-  duration: number;
-  createdAt: string;
-}
-
-interface Waypoint {
-  location: [number, number]; // [lat, lon]
-  name?: string;
+  language: 'en' | 'es' | 'zh-CN' | 'zh-TW';
+  activityType: 'walking' | 'jogging' | 'running' | 'bicycling';
+  customSpeed?: number;   // km/h
+  customPace?: number;    // min/km, overrides customSpeed and activityType
+  homeLocation: { lat: number; lng: number; zoom: number };
+  darkMode: boolean;
 }
 ```
 
-## Implementation Phases
+Routes key: `walk_planner_routes` (array)
 
-### Phase 1: Project Setup
-- Initialize Vite + TypeScript project
-- Install Leaflet.js and dependencies
-- Create basic HTML structure
+```typescript
+interface Route {
+  id: string;
+  name: string;
+  waypoints: { location: [number, number]; name?: string }[]; // [lat, lon]
+  distance: number;   // meters
+  duration: number;   // seconds, at the speed used when saved
+  geometry: { type: 'LineString'; coordinates: [number, number][] }; // [lon, lat]
+  createdAt: string;  // ISO-8601
+}
+```
 
-### Phase 2: Core Components
-- Implement MapComponent with Leaflet
-- Create StorageManager for localStorage
-- Build RoutePlanner with OSRM integration
-
-### Phase 3: UI & Features
-- Add waypoint input controls
-- Implement route visualization
-- Create settings panel
-
-### Phase 4: Polish
-- Add error handling
-- Improve UX/UI
-- Test across browsers
+## Speed Resolution
+Custom pace > custom speed > activity default (walking 5, jogging 8, running 12, bicycling 20 km/h) > fallback 5 km/h. Values are stored in canonical units and converted for display.

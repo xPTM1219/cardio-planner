@@ -2,7 +2,19 @@ import 'leaflet';
 import L from 'leaflet';
 // Leaflet CSS is loaded from index.html to avoid TS side-effect import typing issues.
 import { HomeLocation, Route } from '../types';
+import { DEFAULT_HOME_LOCATION } from './StorageManager';
+import { t } from '../i18n';
+import { convertDistance, unitLabels } from '../utils/speeds';
+import { escapeHtml, formatDuration } from '../utils/format';
+import { MAX_WAYPOINTS, decideMapClick, geometryToLatLngs } from '../utils/waypoints';
 
+/**
+ * Leaflet map with waypoint markers and the calculated route line.
+ *
+ * The map owns the click-to-add behavior. Code outside this class gets
+ * waypoint changes only through {@link setWaypointsChangeHandler}, so there
+ * is one source of truth for the waypoint list.
+ */
 export class MapComponent {
   private static instance: MapComponent;
   private map: L.Map | null = null;
@@ -11,13 +23,16 @@ export class MapComponent {
   private waypointsLine: L.Polyline | null = null;
   private waypointData: Array<{ location: [number, number]; marker: L.Marker }> = [];
   private onWaypointsChanged: ((locations: [number, number][]) => void) | null = null;
-  private settings: { units: 'metric' | 'imperial'; fitnessLevel: 'casual' | 'moderate' | 'active' } = {
+  private onWaypointLimit: (() => void) | null = null;
+  private dragging = false;
+  private lastDragEndAt = Number.NEGATIVE_INFINITY;
+  private settings: { units: 'metric' | 'imperial' } = {
     units: 'metric',
-    fitnessLevel: 'moderate',
   };
 
   private constructor() {}
 
+  /** Returns the shared singleton instance. */
   public static getInstance(): MapComponent {
     if (!MapComponent.instance) {
       MapComponent.instance = new MapComponent();
@@ -26,27 +41,33 @@ export class MapComponent {
   }
 
   /**
-   * Initialize the map
+   * Initialize the Leaflet map with an OSM tile layer and the click-to-add
+   * handler.
+   *
+   * [1] The click handler is attached here, one time, after the map exists.
+   *     Panel re-renders do not attach it again.
+   * [2] The map size is calculated again after the layout is complete.
+   *
+   * @param containerId DOM id of the element to mount the map into.
+   * @param homeLocation Initial center/zoom; defaults to
+   *   {@link DEFAULT_HOME_LOCATION} when omitted.
+   * @throws When Leaflet cannot create the map.
    */
-  async init(containerId: string): Promise<void> {
+  async init(containerId: string, homeLocation: HomeLocation = DEFAULT_HOME_LOCATION): Promise<void> {
     try {
-      const defaultHome: HomeLocation = {
-        lat: 18.2644,
-        lng: -65.648,
-        zoom: 13,
-      };
-      this.map = L.map(containerId).setView([defaultHome.lat, defaultHome.lng], defaultHome.zoom);
+      this.map = L.map(containerId).setView([homeLocation.lat, homeLocation.lng], homeLocation.zoom);
 
-      // Add OpenStreetMap tile layer
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(this.map);
 
-      // Add custom markers for waypoints
-      this.setupWaypointMarkers();
+      this.waypointsLayer = L.layerGroup().addTo(this.map);
 
-      // Ensure map computes correct dimensions after dynamic layout updates
+      // See note [1] in the docstring
+      this.map.on('click', (e: L.LeafletMouseEvent) => this.handleMapClick(e));
+
+      // See note [2] in the docstring
       setTimeout(() => {
         this.map?.invalidateSize();
       }, 0);
@@ -63,16 +84,39 @@ export class MapComponent {
   }
 
   /**
-   * Setup custom waypoint markers
+   * Add a waypoint where the user clicks, unless the click comes from a
+   * marker drag or the waypoint limit is reached (see {@link decideMapClick}).
+   * @param e Leaflet click event.
    */
-  private setupWaypointMarkers(): void {
-    if (this.map) {
-      this.waypointsLayer = L.layerGroup().addTo(this.map);
+  private handleMapClick(e: L.LeafletMouseEvent): void {
+    const decision = decideMapClick({
+      dragging: this.dragging,
+      msSinceDragEnd: Date.now() - this.lastDragEndAt,
+      count: this.waypointData.length,
+    });
+
+    if (decision === 'limit') {
+      this.onWaypointLimit?.();
+      return;
+    }
+    if (decision === 'add') {
+      this.addWaypointMarker([e.latlng.lat, e.latlng.lng]);
     }
   }
 
   /**
-   * Update the line connecting waypoints
+   * End the marker drag state and record the time. A second call for the
+   * same drag does nothing, so the first release keeps its time.
+   */
+  private endDragState(): void {
+    if (this.dragging) {
+      this.dragging = false;
+      this.lastDragEndAt = Date.now();
+    }
+  }
+
+  /**
+   * Draw the thin line that connects the waypoints, replacing the old one.
    */
   private updateWaypointsLine(): void {
     if (this.waypointsLine && this.map) {
@@ -99,28 +143,43 @@ export class MapComponent {
 
   /**
    * Register a handler called when waypoints are added, removed, or moved (drag).
+   * A new call replaces the previous handler.
+   *
+   * @param handler Receives the current ordered list of `[lat, lon]` locations.
    */
   setWaypointsChangeHandler(handler: (locations: [number, number][]) => void): void {
     this.onWaypointsChanged = handler;
   }
 
   /**
-   * Render a route on the map
+   * Register a handler called when a map click cannot add a waypoint because
+   * the route has {@link MAX_WAYPOINTS} waypoints. A new call replaces the
+   * previous handler.
+   *
+   * @param handler Called with no arguments.
    */
-  renderRoute(route: Route): void {
-    // Ensure map is initialized
+  setWaypointLimitHandler(handler: () => void): void {
+    this.onWaypointLimit = handler;
+  }
+
+  /**
+   * Render a route on the map as a dashed polyline with an info popup.
+   * Any previously rendered route is replaced.
+   *
+   * @param route Route to draw (geometry, name, distance, duration).
+   * @param options.basisText Plain-text speed basis appended to the popup,
+   *   e.g. "at your pace 6:30 min/km".
+   */
+  renderRoute(route: Route, options?: { basisText?: string }): void {
     if (!this.map) {
       return;
     }
 
-    // Remove existing route if present
     if (this.routeLayer) {
       this.map.removeLayer(this.routeLayer);
     }
 
-    // Create polyline from route geometry
-    const coordinates = route.geometry.coordinates;
-    const polyline = L.polyline(coordinates, {
+    const polyline = L.polyline(geometryToLatLngs(route.geometry), {
       color: '#e74c3c',
       weight: 4,
       opacity: 0.8,
@@ -129,24 +188,22 @@ export class MapComponent {
 
     this.routeLayer = polyline;
 
-    // Add popup with route info
-    const distanceKm = (route.distance / 1000).toFixed(2);
-    const durationMin = Math.round(route.duration / 60);
+    const distance = convertDistance(route.distance, this.settings.units);
+    const unitLabel = unitLabels(this.settings.units).distance;
+    const basisLine = options?.basisText ? `<br/>${escapeHtml(options.basisText)}` : '';
 
     const popupContent = `
-      <div style="min-width: 150px;">
-        <strong>${route.name}</strong><br/>
-        Distance: ${distanceKm} km<br/>
-        Duration: ${durationMin} min
+      <div class="map-popup">
+        <strong>${escapeHtml(route.name)}</strong><br/>
+        ${escapeHtml(t('distanceLabel'))} ${distance} ${unitLabel}<br/>
+        ${escapeHtml(t('durationLabel'))} ${escapeHtml(formatDuration(route.duration))}${basisLine}
       </div>
     `;
 
     polyline.bindPopup(popupContent);
   }
 
-  /**
-   * Remove route from map
-   */
+  /** Remove the rendered route polyline from the map, if present. */
   clearRoute(): void {
     if (this.routeLayer && this.map) {
       this.map.removeLayer(this.routeLayer);
@@ -170,6 +227,37 @@ export class MapComponent {
     });
   }
 
+  /**
+   * Build the popup HTML for a waypoint marker.
+   * @param label Translated title, for example "Start Point".
+   * @param location `[lat, lng]` of the waypoint.
+   * @returns Popup HTML with a "Delete this point" link.
+   */
+  private waypointPopupHtml(label: string, location: [number, number]): string {
+    return `
+      <div class="map-popup">
+        <strong>${escapeHtml(label)}</strong><br/>
+        ${escapeHtml(t('popupLat'))} ${location[0].toFixed(4)}<br/>
+        ${escapeHtml(t('popupLng'))} ${location[1].toFixed(4)}<br/>
+        <a href="#" class="delete-waypoint-btn">${escapeHtml(t('popupDeletePoint'))}</a>
+      </div>
+    `;
+  }
+
+  /**
+   * Create a draggable marker with a delete link in its popup.
+   *
+   * [1] The drag flag and the drag end time let {@link handleMapClick}
+   *     ignore the map click that Leaflet can send at the end of a drag.
+   *     Any pointer or mouse release also ends the drag state, so the flag
+   *     cannot stay on if Leaflet does not send `dragend`.
+   * [2] The line follows the marker during the drag. The change handler
+   *     gets the new location only when the drag ends.
+   *
+   * @param location `[lat, lng]` of the new marker.
+   * @returns The marker, already added to the waypoint layer.
+   * @throws When the map is not initialized.
+   */
   private createDraggableWaypointMarker(location: [number, number]): L.Marker {
     const marker = L.marker(location, {
       icon: this.createWaypointIcon('blue'),
@@ -182,18 +270,18 @@ export class MapComponent {
       throw new Error('Map not initialized');
     }
     marker.addTo(targetLayer);
+    marker.bindPopup(this.waypointPopupHtml(t('popupWaypoint'), location));
 
-    const initialPopup = `
-      <div style="min-width:150px;">
-        <strong>Waypoint</strong><br/>
-        Lat: ${location[0].toFixed(4)}<br/>
-        Lng: ${location[1].toFixed(4)}<br/>
-        <a href="#" class="delete-waypoint-btn" style="color:#c00;text-decoration:underline;">Delete this point</a>
-      </div>
-    `;
-    marker.bindPopup(initialPopup);
+    // See note [1] in the docstring
+    marker.on('dragstart', () => {
+      this.dragging = true;
+      const release = (): void => this.endDragState();
+      for (const type of ['pointerup', 'mouseup', 'touchend', 'pointercancel']) {
+        document.addEventListener(type, release, { capture: true, once: true });
+      }
+    });
 
-    // Live update line while dragging
+    // See note [2] in the docstring
     marker.on('drag', () => {
       const ll = marker.getLatLng();
       const idx = this.waypointData.findIndex((d) => d.marker === marker);
@@ -203,22 +291,22 @@ export class MapComponent {
       }
     });
 
-    // Commit change and notify
     marker.on('dragend', () => {
+      this.endDragState();
       const ll = marker.getLatLng();
       const idx = this.waypointData.findIndex((d) => d.marker === marker);
       if (idx !== -1) {
         this.waypointData[idx].location = [ll.lat, ll.lng];
+        this.refreshAllMarkerStyles();
         this.updateWaypointsLine();
         this.notifyWaypointsChanged();
       }
     });
 
-    // Handle delete button inside popup
     marker.on('popupopen', (ev: L.PopupEvent) => {
       const popupEl = ev.popup.getElement();
       if (!popupEl) return;
-      const btn = popupEl.querySelector('.delete-waypoint-btn') as HTMLElement | null;
+      const btn = popupEl.querySelector<HTMLElement>('.delete-waypoint-btn');
       if (btn) {
         btn.onclick = (e) => {
           e.preventDefault();
@@ -235,9 +323,18 @@ export class MapComponent {
   }
 
   /**
-   * Add a single waypoint marker (draggable, deletable via popup). Refreshes colors/line and notifies.
+   * Add a single waypoint marker (draggable, deletable via popup).
+   * Refreshes marker colors/line and notifies the change handler.
+   *
+   * @param location `[lat, lon]` coordinate for the new waypoint.
+   * @returns The created Leaflet marker, or `null` when
+   *   {@link MAX_WAYPOINTS} is reached.
    */
-  addWaypointMarker(location: [number, number]): L.Marker {
+  addWaypointMarker(location: [number, number]): L.Marker | null {
+    if (this.waypointData.length >= MAX_WAYPOINTS) {
+      this.onWaypointLimit?.();
+      return null;
+    }
     const marker = this.addWaypointInternal(location);
     this.refreshAllMarkerStyles();
     this.updateWaypointsLine();
@@ -252,7 +349,8 @@ export class MapComponent {
   }
 
   /**
-   * Remove waypoint at index. Updates visuals and notifies listeners.
+   * Remove the waypoint at an index. Updates visuals and notifies listeners.
+   * @param index Zero-based position; out-of-range values are ignored.
    */
   removeWaypoint(index: number): void {
     if (index < 0 || index >= this.waypointData.length) return;
@@ -268,6 +366,10 @@ export class MapComponent {
     this.notifyWaypointsChanged();
   }
 
+  /**
+   * Set the color and popup of every marker from its position: green for
+   * the start, red for the end, blue between.
+   */
   private refreshAllMarkerStyles(): void {
     const n = this.waypointData.length;
     this.waypointData.forEach((entry, i) => {
@@ -276,25 +378,23 @@ export class MapComponent {
       const color = isFirst ? 'green' : isLast ? 'red' : 'blue';
       entry.marker.setIcon(this.createWaypointIcon(color));
 
-      const loc = entry.location;
-      let label = `Waypoint ${i + 1}`;
-      if (isFirst) label = 'Start Point';
-      if (isLast) label = 'End Point';
-      const popupContent = `
-        <div style="min-width:150px;">
-          <strong>${label}</strong><br/>
-          Lat: ${loc[0].toFixed(4)}<br/>
-          Lng: ${loc[1].toFixed(4)}<br/>
-          <a href="#" class="delete-waypoint-btn" style="color:#c00;text-decoration:underline;">Delete this point</a>
-        </div>
-      `;
-      entry.marker.setPopupContent(popupContent);
+      let label = t('popupWaypointN', { n: i + 1 });
+      if (isFirst) label = t('popupStartPoint');
+      if (isLast) label = t('popupEndPoint');
+      entry.marker.setPopupContent(this.waypointPopupHtml(label, entry.location));
     });
   }
 
   /**
-    * Remove all waypoint markers
-    */
+   * Re-render marker popup labels (e.g. after a language change).
+   */
+  refreshMarkerLabels(): void {
+    this.refreshAllMarkerStyles();
+  }
+
+  /**
+   * Remove all waypoint markers and the connecting line, then notify listeners.
+   */
   clearWaypointMarkers(): void {
     const had = this.waypointData.length > 0;
     if (this.waypointsLayer) {
@@ -313,25 +413,26 @@ export class MapComponent {
   }
 
   /**
-    * Update all waypoint markers based on a list of coordinates.
-    * This clears existing markers and adds new draggable/deletable ones.
-    * @param locations Array of [lat, lng] coordinates for waypoints.
-    */
+   * Replace all waypoint markers with draggable/deletable ones built from
+   * `locations`, then refresh visuals and notify listeners. Locations past
+   * {@link MAX_WAYPOINTS} are dropped.
+   *
+   * @param locations Ordered `[lat, lon]` coordinates; an empty list clears.
+   */
   updateWaypoints(locations: [number, number][]): void {
     this.clearWaypointMarkers();
     if (!this.map || locations.length === 0) {
       return;
     }
-    locations.forEach((loc) => this.addWaypointInternal(loc));
+    locations.slice(0, MAX_WAYPOINTS).forEach((loc) => this.addWaypointInternal(loc));
     this.refreshAllMarkerStyles();
     this.updateWaypointsLine();
     this.notifyWaypointsChanged();
   }
 
-
-
   /**
-   * Fit map to show all waypoints and route
+   * Fit the map view to show all given waypoints.
+   * @param waypoints `[lat, lon]` list; needs at least two points to act.
    */
   fitBounds(waypoints: [number, number][]): void {
     if (waypoints.length >= 2 && this.map) {
@@ -341,21 +442,45 @@ export class MapComponent {
   }
 
   /**
-   * Get the map instance
+   * Smoothly fly the map to a location without touching waypoints or routes.
+   * @param location `[lat, lon]` target center.
+   * @param zoom Target zoom level (address search uses 16).
+   */
+  flyToLocation(location: [number, number], zoom: number): void {
+    this.map?.flyTo(location, zoom);
+  }
+
+  /**
+   * Get the current map center and zoom.
+   * @returns The view as a home location, or `null` before {@link init}.
+   */
+  getCurrentView(): HomeLocation | null {
+    if (!this.map) {
+      return null;
+    }
+    const center = this.map.getCenter();
+    return { lat: center.lat, lng: center.lng, zoom: this.map.getZoom() };
+  }
+
+  /**
+   * Get the underlying Leaflet map instance.
+   * @returns The map, or `null` before {@link init} has completed.
    */
   getMap(): L.Map | null {
     return this.map;
   }
 
   /**
-   * Update settings (called when user changes preferences)
+   * Merge UI-relevant settings used when rendering popups.
+   * @param settings Partial settings; only `units` is currently consumed.
    */
   updateSettings(settings: Partial<typeof this.settings>): void {
     this.settings = { ...this.settings, ...settings };
   }
 
   /**
-   * Set the map view to a specific home location.
+   * Move the map view to a home location immediately (no animation).
+   * @param homeLocation Center coordinates and zoom level.
    */
   setHomeView(homeLocation: HomeLocation): void {
     if (!this.map) {
@@ -366,8 +491,9 @@ export class MapComponent {
   }
 
   /**
-    * Remove map from DOM
-    */
+   * Remove the map from the DOM and reset all internal layer state.
+   * The instance remains reusable after another {@link init} call.
+   */
   destroy(): void {
     if (this.map) {
       this.map.remove();
@@ -377,5 +503,7 @@ export class MapComponent {
     this.waypointsLayer = null;
     this.waypointsLine = null;
     this.waypointData = [];
+    this.dragging = false;
+    this.lastDragEndAt = Number.NEGATIVE_INFINITY;
   }
 }
