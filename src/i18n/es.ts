@@ -2,6 +2,7 @@ import type { TranslationKey } from './index';
 
 export const es: Record<TranslationKey, string> = {
   appLoading: 'Cargando Cardio Planner...',
+  appVersionLabel: 'Versión {version}',
   routePlannerTitle: 'Planificador de rutas',
   routeInformationTitle: 'Información de la ruta',
   statusInitial: 'Haz clic en el mapa para añadir puntos de paso...',
@@ -41,9 +42,23 @@ export const es: Record<TranslationKey, string> = {
   deleteRouteButton: 'Eliminar',
   confirmDeleteRoute: '¿Eliminar la ruta «{name}»? No se puede deshacer.',
 
+  importRoutesButton: 'Importar…',
+  exportRoutesButton: 'Exportar',
+  exportResult: 'Se exportaron {n} ruta(s).',
+  exportError: 'Error: no se pudieron exportar las rutas.',
+  importResult: 'Se importaron {added} ruta(s). Se omitieron {duplicates} ya guardadas y {invalid} no válidas.',
+  importErrorNotJson: 'Error: este archivo no es un archivo JSON.',
+  importErrorWrongFormat: 'Error: este archivo no es una exportación de rutas de Cardio Planner.',
+  importErrorNewerVersion:
+    'Error: este archivo es de una versión más reciente de Cardio Planner. Recarga la página para obtener la última versión e inténtalo de nuevo.',
+  importErrorTooLarge: 'Error: el archivo es demasiado grande. El máximo es {max} MB.',
+  importErrorRead: 'Error: no se pudo leer el archivo.',
+  importErrorSave:
+    'Error: no se pudieron guardar las rutas importadas. Es posible que el almacenamiento del navegador esté lleno.',
+
   statusCleared: 'Mapa borrado. Haz clic en el mapa para añadir puntos de paso...',
   statusWaypointsCount:
-    '{n} punto(s) de paso. Arrastra los marcadores para moverlos; usa la ventana del marcador para eliminar. Pulsa «Calcular ruta» para actualizar.',
+    '{n} punto(s) de paso. Arrastra los marcadores para moverlos; haz clic en la línea para añadir un punto entre dos; usa la ventana del marcador para eliminar; Ctrl+clic o Ctrl+arrastrar (⌘ en Mac) para seleccionar varios puntos. Pulsa «Calcular ruta» para actualizar.',
   statusMaxWaypoints: 'Puedes añadir un máximo de {max} puntos.',
   statusNeedTwoWaypoints: 'Se necesitan al menos 2 puntos de paso para calcular una ruta.',
   statusNoRouteInfo: 'No hay información de la ruta disponible.',
@@ -108,11 +123,14 @@ export const es: Record<TranslationKey, string> = {
   activityBasisRunning: 'carrera',
   activityBasisBicycling: 'bicicleta',
 
-  popupWaypoint: 'Punto de paso',
   popupStartPoint: 'Punto de inicio',
   popupEndPoint: 'Punto final',
   popupWaypointN: 'Punto de paso {n}',
   popupDeletePoint: 'Eliminar este punto',
   popupLat: 'Lat.:',
   popupLng: 'Long.:',
+
+  selectionCount: '{n} seleccionado(s)',
+  deleteSelectedButton: 'Eliminar',
+  clearSelectionButton: 'Deseleccionar',
 };

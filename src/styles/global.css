@@ -99,8 +99,12 @@ body.dark-mode {
   height: 100%;
 }
 
-/* Header Styles */
+/* Header Styles. The title is on the left and the version is on the right. */
 .header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   background: var(--header-bg);
   color: white;
   padding: 1rem;
@@ -110,7 +114,13 @@ body.dark-mode {
 
 .header h1 {
   font-size: 1.5rem;
-  margin-bottom: 0.5rem;
+}
+
+.app-version {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Panels */
@@ -376,6 +386,28 @@ body.dark-mode {
   margin-top: 0;
 }
 
+.modal-footer .btn:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* The buttons before this one stay on the left of the footer. */
+.modal-footer .modal-footer-end {
+  margin-left: auto;
+}
+
+/* Result of an action in a modal, for example an import. */
+.modal-message {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.modal-message.is-error {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
 /* Saved routes table (Tabulator overrides that follow the theme colors) */
 .saved-routes-table.tabulator {
   background-color: var(--color-surface);
@@ -433,6 +465,64 @@ body.dark-mode {
   display: flex;
   justify-content: center;
   gap: 0.4rem;
+}
+
+/* Waypoint markers. The color shows the position in the route. */
+.waypoint-dot {
+  width: 12px;
+  height: 12px;
+  background-color: blue;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.waypoint-dot--start {
+  background-color: green;
+}
+
+.waypoint-dot--end {
+  background-color: red;
+}
+
+/* A selected waypoint has an amber ring with a dark edge. */
+.waypoint-dot.is-selected {
+  box-shadow:
+    0 0 0 3px #f59e0b,
+    0 0 0 5px rgba(0, 0, 0, 0.55);
+}
+
+/* Selection bar on the map (top right). It shows when waypoints are selected.
+   On a narrow screen it wraps, so it does not cover the zoom buttons (left). */
+.selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: calc(100vw - 72px);
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+
+/* Box drawn with Ctrl+drag to select waypoints. */
+.selection-box {
+  position: absolute;
+  z-index: 800;
+  border: 2px dashed #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  pointer-events: none;
+}
+
+/* Invisible wide line on the waypoint line. A click on it adds a point. On
+   hover a soft band shows where the click works. */
+.waypoint-line-hit {
+  cursor: copy;
+}
+
+.waypoint-line-hit:hover {
+  stroke-opacity: 0.2;
 }
 
 /* Map popups */

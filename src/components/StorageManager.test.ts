@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StorageManager, getDefaultSettings, validateHomeLocation } from './StorageManager';
-import type { UserSettings } from '../types';
+import type { Route, UserSettings } from '../types';
 
 describe('StorageManager', () => {
   let manager: StorageManager;
@@ -193,6 +193,54 @@ describe('StorageManager', () => {
     const routes = await manager.loadRoutes();
     expect(routes.map((r) => r.id)).toEqual(['r1', 'r3']);
   });
+  describe('importRoutes', () => {
+    const route = (id: string): Route => ({
+      id,
+      name: `Route ${id}`,
+      waypoints: [{ location: [45, -100] }, { location: [45.01, -100] }],
+      distance: 1112,
+      duration: 800,
+      geometry: { type: 'LineString', coordinates: [[-100, 45], [-100, 45.01]] },
+      createdAt: '2026-10-20T10:00:00.000Z',
+    });
+
+    it('adds only the routes with new ids and keeps the saved ones', async () => {
+      await manager.saveRoute(route('a'));
+
+      const result = await manager.importRoutes([{ ...route('a'), name: 'Other' }, route('b')]);
+
+      expect(result).toEqual({ added: 1, duplicates: 1 });
+      const routes = await manager.loadRoutes();
+      expect(routes.map((r) => [r.id, r.name])).toEqual([
+        ['a', 'Route a'],
+        ['b', 'Route b'],
+      ]);
+    });
+
+    it('writes one time, and not at all when no route is new', async () => {
+      await manager.saveRoute(route('a'));
+      const setItem = vi.spyOn(Storage.prototype, 'setItem');
+
+      await manager.importRoutes([route('b'), route('c')]);
+      expect(setItem).toHaveBeenCalledTimes(1);
+
+      setItem.mockClear();
+      await manager.importRoutes([route('a')]);
+      expect(setItem).not.toHaveBeenCalled();
+      setItem.mockRestore();
+    });
+
+    it('throws when the storage cannot be written', async () => {
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('full', 'QuotaExceededError');
+      });
+
+      await expect(manager.importRoutes([route('a')])).rejects.toThrow('Failed to save imported routes');
+      setItem.mockRestore();
+      expect(await manager.loadRoutes()).toEqual([]);
+    });
+  });
+
   describe('updateSettings', () => {
     it('merges changes and keeps the other fields', async () => {
       await manager.saveSettings({ ...getDefaultSettings(), units: 'imperial', customSpeed: 9 });

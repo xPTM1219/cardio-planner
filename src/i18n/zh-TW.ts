@@ -2,6 +2,7 @@ import type { TranslationKey } from './index';
 
 export const zhTW: Record<TranslationKey, string> = {
   appLoading: '正在載入 Cardio Planner...',
+  appVersionLabel: '版本 {version}',
   routePlannerTitle: '路線規劃',
   routeInformationTitle: '路線資訊',
   statusInitial: '點擊地圖以新增途經點...',
@@ -41,9 +42,21 @@ export const zhTW: Record<TranslationKey, string> = {
   deleteRouteButton: '刪除',
   confirmDeleteRoute: '刪除路線「{name}」？此操作無法復原。',
 
+  importRoutesButton: '匯入…',
+  exportRoutesButton: '匯出',
+  exportResult: '已匯出 {n} 條路線。',
+  exportError: '錯誤：無法匯出路線。',
+  importResult: '已匯入 {added} 條路線。略過 {duplicates} 條已儲存的路線和 {invalid} 條無效路線。',
+  importErrorNotJson: '錯誤：此檔案不是 JSON 檔案。',
+  importErrorWrongFormat: '錯誤：此檔案不是 Cardio Planner 路線匯出檔案。',
+  importErrorNewerVersion: '錯誤：此檔案來自較新版本的 Cardio Planner。請重新整理頁面以取得最新版本，然後再試一次。',
+  importErrorTooLarge: '錯誤：檔案太大。上限為 {max} MB。',
+  importErrorRead: '錯誤：無法讀取檔案。',
+  importErrorSave: '錯誤：無法儲存匯入的路線。瀏覽器儲存空間可能已滿。',
+
   statusCleared: '地圖已清除。點擊地圖以新增途經點...',
   statusWaypointsCount:
-    '{n} 個途經點。拖曳標記可移動位置，使用標記彈出視窗可刪除。點擊「計算路線」進行更新。',
+    '{n} 個途經點。拖曳標記可移動位置，點擊連線可在兩點之間新增途經點，使用標記彈出視窗可刪除，按住 Ctrl（Mac 上為 ⌘）點擊或拖曳可選取多個點。點擊「計算路線」進行更新。',
   statusMaxWaypoints: '最多可以新增 {max} 個點。',
   statusNeedTwoWaypoints: '至少需要 2 個途經點才能計算路線。',
   statusNoRouteInfo: '暫無路線資訊。',
@@ -108,11 +121,14 @@ export const zhTW: Record<TranslationKey, string> = {
   activityBasisRunning: '跑步',
   activityBasisBicycling: '騎行',
 
-  popupWaypoint: '途經點',
   popupStartPoint: '起點',
   popupEndPoint: '終點',
   popupWaypointN: '途經點 {n}',
   popupDeletePoint: '刪除此點',
   popupLat: '緯度：',
   popupLng: '經度：',
+
+  selectionCount: '已選取 {n} 個',
+  deleteSelectedButton: '刪除',
+  clearSelectionButton: '取消選取',
 };

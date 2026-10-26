@@ -5,6 +5,7 @@
 export const en = {
   // App chrome
   appLoading: 'Loading Cardio Planner...',
+  appVersionLabel: 'Version {version}',
   routePlannerTitle: 'Route Planner',
   routeInformationTitle: 'Route Information',
   statusInitial: 'Click on the map to add waypoints...',
@@ -47,10 +48,24 @@ export const en = {
   deleteRouteButton: 'Delete',
   confirmDeleteRoute: 'Delete the route "{name}"? You cannot undo this.',
 
+  // Route export and import
+  importRoutesButton: 'Import…',
+  exportRoutesButton: 'Export',
+  exportResult: 'Exported {n} route(s).',
+  exportError: 'Error: Could not export the routes.',
+  importResult: 'Imported {added} route(s). Skipped {duplicates} already saved and {invalid} not valid.',
+  importErrorNotJson: 'Error: This file is not a JSON file.',
+  importErrorWrongFormat: 'Error: This file is not a Cardio Planner routes export.',
+  importErrorNewerVersion:
+    'Error: This file is from a newer version of Cardio Planner. Reload the page to get the latest version, then try again.',
+  importErrorTooLarge: 'Error: The file is too large. The maximum is {max} MB.',
+  importErrorRead: 'Error: Could not read the file.',
+  importErrorSave: 'Error: Could not save the imported routes. The browser storage may be full.',
+
   // Status messages
   statusCleared: 'Map cleared. Click on the map to add waypoints...',
   statusWaypointsCount:
-    '{n} waypoint(s). Drag markers to move, use marker popup to delete. Click "Calculate Route" to update.',
+    '{n} waypoint(s). Drag markers to move, click the line to add a point between two, use marker popup to delete. Ctrl+click or Ctrl+drag (⌘ on Mac) to select several points. Click "Calculate Route" to update.',
   statusMaxWaypoints: 'You can add a maximum of {max} points.',
   statusNeedTwoWaypoints: 'Need at least 2 waypoints to calculate a route.',
   statusNoRouteInfo: 'No route information available.',
@@ -121,11 +136,15 @@ export const en = {
   activityBasisBicycling: 'bike',
 
   // Map popups
-  popupWaypoint: 'Waypoint',
   popupStartPoint: 'Start Point',
   popupEndPoint: 'End Point',
   popupWaypointN: 'Waypoint {n}',
   popupDeletePoint: 'Delete this point',
   popupLat: 'Lat:',
   popupLng: 'Lng:',
+
+  // Selection of several waypoints
+  selectionCount: '{n} selected',
+  deleteSelectedButton: 'Delete',
+  clearSelectionButton: 'Clear',
 };

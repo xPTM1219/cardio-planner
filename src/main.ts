@@ -14,11 +14,20 @@ import {
   unitLabels,
 } from './utils/speeds';
 import { escapeHtml, formatDateTime } from './utils/format';
+import {
+  MAX_IMPORT_BYTES,
+  RoutesImportError,
+  buildRoutesExport,
+  parseRoutesImport,
+  routesExportFileName,
+} from './utils/routeTransfer';
 import { getRouteLocations } from './utils/savedRoutes';
 import { MAX_WAYPOINTS, formatLatLng } from './utils/waypoints';
-import { Language, getLanguage, setLanguage, t } from './i18n';
+import { APP_VERSION } from './utils/version';
+import { Language, TranslationKey, getLanguage, setLanguage, t } from './i18n';
+import { downloadTextFile } from './ui/download';
 import { SettingsModalValues, openSettingsModal } from './ui/settingsModal';
-import { openSavedRoutesModal } from './ui/savedRoutesModal';
+import { RoutesTransferOutcome, openSavedRoutesModal } from './ui/savedRoutesModal';
 
 // DOM elements
 const app = document.getElementById('app');
@@ -71,6 +80,17 @@ function setStatus(message: string): void {
   const statusEl = document.getElementById('route-status');
   if (statusEl) {
     statusEl.textContent = message;
+  }
+}
+
+/**
+ * Show the app version in the header. The tooltip uses the active language.
+ */
+function renderAppVersion(): void {
+  const versionEl = document.getElementById('app-version');
+  if (versionEl) {
+    versionEl.textContent = `v${APP_VERSION}`;
+    versionEl.title = t('appVersionLabel', { version: APP_VERSION });
   }
 }
 
@@ -276,6 +296,73 @@ async function refreshSavedRoutesCount(): Promise<void> {
   button.textContent = t('savedRoutesButton', { n: count });
 }
 
+/** Message for each reason that a file cannot be imported. */
+const IMPORT_ERROR_KEYS: Record<RoutesImportError, TranslationKey> = {
+  notJson: 'importErrorNotJson',
+  wrongFormat: 'importErrorWrongFormat',
+  newerVersion: 'importErrorNewerVersion',
+};
+
+/**
+ * Save all valid stored routes to a JSON file.
+ * @returns The message for the Saved Routes modal.
+ */
+async function exportSavedRoutes(): Promise<RoutesTransferOutcome> {
+  try {
+    const now = new Date();
+    const data = buildRoutesExport(await storageManager.loadRoutes(), APP_VERSION, now);
+    downloadTextFile(routesExportFileName(now), JSON.stringify(data, null, 2), 'application/json');
+    return { message: t('exportResult', { n: data.routes.length }), isError: false };
+  } catch (error) {
+    console.error('Error exporting routes:', error);
+    return { message: t('exportError'), isError: true };
+  }
+}
+
+/**
+ * Add the routes from an export file to the saved routes.
+ *
+ * [1] The file size is checked before the file is read.
+ * [2] A file that is not a routes export changes nothing.
+ * [3] The new route list goes back to the modal only when routes were added.
+ *
+ * @param file File that the user picked.
+ * @returns The message for the Saved Routes modal and, when routes were
+ *   added, all stored routes.
+ */
+async function importSavedRoutes(file: File): Promise<RoutesTransferOutcome> {
+  // See note [1] in the docstring
+  if (file.size > MAX_IMPORT_BYTES) {
+    return { message: t('importErrorTooLarge', { max: MAX_IMPORT_BYTES / (1024 * 1024) }), isError: true };
+  }
+
+  let text: string;
+  try {
+    text = await file.text();
+  } catch (error) {
+    console.error('Error reading import file:', error);
+    return { message: t('importErrorRead'), isError: true };
+  }
+
+  const parsed = parseRoutesImport(text);
+  // See note [2] in the docstring
+  if (!parsed.ok) {
+    return { message: t(IMPORT_ERROR_KEYS[parsed.error]), isError: true };
+  }
+
+  try {
+    const { added, duplicates } = await storageManager.importRoutes(parsed.routes);
+    await refreshSavedRoutesCount();
+    const message = t('importResult', { added, duplicates, invalid: parsed.invalid });
+    // See note [3] in the docstring
+    const routes = added > 0 ? await storageManager.loadRoutes() : undefined;
+    return { message, isError: false, routes };
+  } catch (error) {
+    console.error('Error importing routes:', error);
+    return { message: t('importErrorSave'), isError: true };
+  }
+}
+
 /** Open the Saved Routes modal with the stored routes. */
 async function openSavedRoutes(): Promise<void> {
   const settings = storageManager.getSettings();
@@ -289,6 +376,8 @@ async function openSavedRoutes(): Promise<void> {
     },
     onLoad: loadRoute,
     onDelete: deleteSavedRoute,
+    onExport: exportSavedRoutes,
+    onImport: importSavedRoutes,
   });
 }
 
@@ -522,6 +611,7 @@ function remountPanels(): void {
 async function refreshUI(language: Language): Promise<void> {
   setLanguage(language);
   syncHtmlLang(language);
+  renderAppVersion();
   remountPanels();
   mapComponent.refreshMarkerLabels();
   await refreshSavedRoutesCount();
@@ -565,6 +655,7 @@ async function initUI(): Promise<void> {
   setLanguage(savedSettings.language);
   syncHtmlLang(savedSettings.language);
   applyTheme(savedSettings.darkMode);
+  renderAppVersion();
 
   remountPanels();
 

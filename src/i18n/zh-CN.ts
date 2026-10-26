@@ -2,6 +2,7 @@ import type { TranslationKey } from './index';
 
 export const zhCN: Record<TranslationKey, string> = {
   appLoading: '正在加载 Cardio Planner...',
+  appVersionLabel: '版本 {version}',
   routePlannerTitle: '路线规划',
   routeInformationTitle: '路线信息',
   statusInitial: '点击地图以添加途经点...',
@@ -41,9 +42,21 @@ export const zhCN: Record<TranslationKey, string> = {
   deleteRouteButton: '删除',
   confirmDeleteRoute: '删除路线“{name}”？此操作无法撤销。',
 
+  importRoutesButton: '导入…',
+  exportRoutesButton: '导出',
+  exportResult: '已导出 {n} 条路线。',
+  exportError: '错误：无法导出路线。',
+  importResult: '已导入 {added} 条路线。跳过 {duplicates} 条已保存的路线和 {invalid} 条无效路线。',
+  importErrorNotJson: '错误：此文件不是 JSON 文件。',
+  importErrorWrongFormat: '错误：此文件不是 Cardio Planner 路线导出文件。',
+  importErrorNewerVersion: '错误：此文件来自更新版本的 Cardio Planner。请刷新页面以获取最新版本，然后重试。',
+  importErrorTooLarge: '错误：文件太大。最大为 {max} MB。',
+  importErrorRead: '错误：无法读取文件。',
+  importErrorSave: '错误：无法保存导入的路线。浏览器存储空间可能已满。',
+
   statusCleared: '地图已清除。点击地图以添加途经点...',
   statusWaypointsCount:
-    '{n} 个途经点。拖动标记可移动位置，使用标记弹窗可删除。点击“计算路线”进行更新。',
+    '{n} 个途经点。拖动标记可移动位置，点击连线可在两点之间添加途经点，使用标记弹窗可删除，按住 Ctrl（Mac 上为 ⌘）点击或拖动可选择多个点。点击“计算路线”进行更新。',
   statusMaxWaypoints: '最多可以添加 {max} 个点。',
   statusNeedTwoWaypoints: '至少需要 2 个途经点才能计算路线。',
   statusNoRouteInfo: '暂无路线信息。',
@@ -108,11 +121,14 @@ export const zhCN: Record<TranslationKey, string> = {
   activityBasisRunning: '跑步',
   activityBasisBicycling: '骑行',
 
-  popupWaypoint: '途经点',
   popupStartPoint: '起点',
   popupEndPoint: '终点',
   popupWaypointN: '途经点 {n}',
   popupDeletePoint: '删除此点',
   popupLat: '纬度：',
   popupLng: '经度：',
+
+  selectionCount: '已选择 {n} 个',
+  deleteSelectedButton: '删除',
+  clearSelectionButton: '取消选择',
 };
