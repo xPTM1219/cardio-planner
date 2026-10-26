@@ -16,6 +16,16 @@ import { Modal } from './modal';
 // Only the Tabulator modules that the table uses are loaded.
 Tabulator.registerModule([FormatModule, SortModule, InteractionModule, ResizeTableModule]);
 
+/** Result of an export or an import, shown in the modal. */
+export interface RoutesTransferOutcome {
+  /** Plain-text message. */
+  message: string;
+  /** `true` when the message tells about an error. */
+  isError: boolean;
+  /** All stored routes after an import that added routes. */
+  routes?: Route[];
+}
+
 /** Options for {@link openSavedRoutesModal}. */
 export interface SavedRoutesModalOptions {
   /** Stored routes, possibly with corrupt entries (they are not shown). */
@@ -29,6 +39,13 @@ export interface SavedRoutesModalOptions {
    * @returns `true` when the route was deleted.
    */
   onDelete: (route: Route) => Promise<boolean>;
+  /** Saves the stored routes to a file. Errors come back in the outcome. */
+  onExport: () => Promise<RoutesTransferOutcome>;
+  /**
+   * Adds the routes from a file that the user picked. Errors come back in
+   * the outcome.
+   */
+  onImport: (file: File) => Promise<RoutesTransferOutcome>;
 }
 
 /**
@@ -61,31 +78,83 @@ function actionButton(label: string, className: string, onClick: () => void): HT
  *     the action buttons.
  * [4] Long translated column titles wrap. They are not cut off in narrow
  *     windows.
+ * [5] The export and import results show in the modal, because the status
+ *     panel is behind it.
+ * [6] The file field is cleared after each pick, so the user can pick the
+ *     same file again.
+ * [7] After an import that added routes, the table shows the new list.
  *
  * @param options Routes, display settings, and callbacks.
  * @returns The open modal.
  */
 export function openSavedRoutesModal(options: SavedRoutesModalOptions): Modal {
   const routesById = new Map<string, Route>();
-  for (const route of options.routes) {
-    if (route && typeof route.id === 'string') {
-      routesById.set(route.id, route);
+  const indexRoutes = (routes: Route[]): void => {
+    routesById.clear();
+    for (const route of routes) {
+      if (route && typeof route.id === 'string') {
+        routesById.set(route.id, route);
+      }
     }
-  }
+  };
+  indexRoutes(options.routes);
   const rows = toSavedRouteRows(options.routes, options.rowOptions);
+  let rowCount = rows.length;
   let table: Tabulator | null = null;
 
   const modal = new Modal({
     id: 'saved-routes-modal',
     title: t('savedRoutesModalTitle'),
-    bodyHtml: '<div class="saved-routes-table"></div>',
-    footerHtml: `<button type="button" class="btn btn-secondary" data-modal-close>${escapeHtml(t('closeButton'))}</button>`,
+    bodyHtml: `
+      <div class="saved-routes-table"></div>
+      <p class="modal-message" id="saved-routes-message" role="status" hidden></p>
+      <input type="file" id="import-routes-file" accept=".json,application/json" hidden />
+    `,
+    footerHtml: `
+      <button type="button" class="btn btn-secondary" id="import-routes-btn">${escapeHtml(t('importRoutesButton'))}</button>
+      <button type="button" class="btn btn-secondary" id="export-routes-btn">${escapeHtml(t('exportRoutesButton'))}</button>
+      <button type="button" class="btn btn-secondary modal-footer-end" data-modal-close>${escapeHtml(t('closeButton'))}</button>
+    `,
     className: 'modal-wide',
     onClose: () => {
       table?.destroy();
       table = null;
     },
   });
+  const exportButton = modal.query<HTMLButtonElement>('#export-routes-btn');
+  const importButton = modal.query<HTMLButtonElement>('#import-routes-btn');
+  const fileInput = modal.query<HTMLInputElement>('#import-routes-file');
+
+  const updateExportButton = (): void => {
+    if (exportButton) exportButton.disabled = rowCount === 0;
+  };
+
+  // See note [5] in the docstring
+  const showMessage = (outcome: RoutesTransferOutcome): void => {
+    const messageEl = modal.query<HTMLElement>('#saved-routes-message');
+    if (!messageEl) return;
+    messageEl.textContent = outcome.message;
+    messageEl.classList.toggle('is-error', outcome.isError);
+    messageEl.hidden = false;
+  };
+
+  const importFile = async (file: File): Promise<void> => {
+    if (importButton) importButton.disabled = true;
+    try {
+      const outcome = await options.onImport(file);
+      // See note [7] in the docstring
+      if (outcome.routes) {
+        indexRoutes(outcome.routes);
+        const newRows = toSavedRouteRows(outcome.routes, options.rowOptions);
+        rowCount = newRows.length;
+        await table?.replaceData(newRows);
+        updateExportButton();
+      }
+      showMessage(outcome);
+    } finally {
+      if (importButton) importButton.disabled = false;
+    }
+  };
 
   const loadRoute = (id: string): void => {
     const route = routesById.get(id);
@@ -102,6 +171,8 @@ export function openSavedRoutesModal(options: SavedRoutesModalOptions): Modal {
     if (await options.onDelete(route)) {
       routesById.delete(id);
       await row.delete();
+      rowCount--;
+      updateExportButton();
     }
   };
 
@@ -119,6 +190,22 @@ export function openSavedRoutesModal(options: SavedRoutesModalOptions): Modal {
   };
 
   modal.open();
+  updateExportButton();
+
+  exportButton?.addEventListener('click', () => {
+    void options.onExport().then(showMessage);
+  });
+  importButton?.addEventListener('click', () => {
+    fileInput?.click();
+  });
+  fileInput?.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    // See note [6] in the docstring
+    fileInput.value = '';
+    if (file) {
+      void importFile(file);
+    }
+  });
 
   // See note [1] in the docstring
   const container = modal.query<HTMLElement>('.saved-routes-table');

@@ -8,31 +8,9 @@ import {
   unitLabels,
 } from '../utils/speeds';
 import { formatDuration } from '../utils/format';
+import { pathDistanceMeters } from '../utils/geo';
 import { MAX_WAYPOINTS } from '../utils/waypoints';
 import { t } from '../i18n';
-
-// Haversine distance calculation
-function toRad(value: number): number {
-  return (value * Math.PI) / 180;
-}
-
-/**
- * Great-circle distance between two `[lat, lon]` points using the Haversine
- * formula on a spherical earth of radius 6371 km.
- */
-function distanceMeters(a: [number, number], b: [number, number]): number {
-  const earthRadiusM = 6371e3;
-  const lat1 = toRad(a[0]);
-  const lat2 = toRad(b[0]);
-  const dLat = toRad(b[0] - a[0]);
-  const dLng = toRad(b[1] - a[1]);
-
-  const x =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-  return earthRadiusM * c;
-}
 
 /**
  * Plans straight-line routes between waypoints and formats the results.
@@ -150,10 +128,7 @@ export class RoutePlanner {
 
     try {
       // See note [1] in the docstring
-      let totalDistance = 0;
-      for (let i = 1; i < this.waypoints.length; i++) {
-        totalDistance += distanceMeters(this.waypoints[i - 1].location, this.waypoints[i].location);
-      }
+      const totalDistance = pathDistanceMeters(this.waypoints.map((wp) => wp.location));
 
       const effectiveSpeedMps =
         Number.isFinite(speedMps) && speedMps > 0 ? speedMps : FALLBACK_SPEED_KMH / 3.6;

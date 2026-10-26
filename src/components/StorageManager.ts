@@ -1,5 +1,6 @@
 import { ActivityType, HomeLocation, UserSettings, Route } from '../types';
 import { detectBrowserLanguage, Language, TranslationKey } from '../i18n';
+import { mergeRoutes } from '../utils/routeTransfer';
 
 const STORAGE_KEY_SETTINGS = 'walk_planner_settings';
 const STORAGE_KEY_ROUTES = 'walk_planner_routes';
@@ -236,6 +237,34 @@ export class StorageManager {
     } catch (error) {
       console.error('Error saving route:', error);
       throw new Error('Failed to save route to storage');
+    }
+  }
+
+  /**
+   * Add imported routes to the saved routes with one write.
+   *
+   * [1] A route whose id is already saved is skipped (see `mergeRoutes`).
+   *     The saved routes stay as they are, also the entries that are not
+   *     valid.
+   * [2] When no route is new, nothing is written.
+   *
+   * @param incoming Checked routes, for example from `parseRoutesImport`.
+   * @returns The number of routes added and the number skipped as
+   *   duplicates.
+   * @throws When localStorage cannot be written, for example when it is full.
+   */
+  async importRoutes(incoming: readonly Route[]): Promise<{ added: number; duplicates: number }> {
+    try {
+      // See note [1] in the docstring
+      const { routes, added, duplicates } = mergeRoutes(await this.loadRoutes(), incoming);
+      // See note [2] in the docstring
+      if (added > 0) {
+        localStorage.setItem(STORAGE_KEY_ROUTES, JSON.stringify(routes));
+      }
+      return { added, duplicates };
+    } catch (error) {
+      console.error('Error importing routes:', error);
+      throw new Error('Failed to save imported routes to storage');
     }
   }
 
